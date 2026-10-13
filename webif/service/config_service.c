@@ -55,6 +55,10 @@ bool webif_config_snapshot(S_WEBIF_CONFIG_VIEW *out)
     tcmg_strlcpy(out->failban_allowlist, g_cfg.failban_allowlist, sizeof(out->failban_allowlist));
     out->failban_max_fails = g_cfg.failban_max_fails;
     out->failban_ban_secs = g_cfg.failban_ban_secs;
+    tcmg_strlcpy(out->seller_name, g_cfg.seller_name, sizeof(out->seller_name));
+    tcmg_strlcpy(out->seller_type, g_cfg.seller_type, sizeof(out->seller_type));
+    tcmg_strlcpy(out->seller_host, g_cfg.seller_host, sizeof(out->seller_host));
+    out->seller_port = g_cfg.seller_port;
     pthread_rwlock_unlock(&g_cfg.acc_lock);
     return true;
 }
@@ -100,6 +104,11 @@ bool webif_config_apply(const S_WEBIF_CONFIG_PATCH *p, bool *restart_required)
     int old_failban_enabled = g_cfg.failban_enabled;
     int old_failban_max_fails = g_cfg.failban_max_fails;
     int old_failban_ban_secs = g_cfg.failban_ban_secs;
+    char old_seller_name[CFGVAL_LEN], old_seller_type[16], old_seller_host[CFGKEY_LEN];
+    int old_seller_port = g_cfg.seller_port;
+    tcmg_strlcpy(old_seller_name, g_cfg.seller_name, sizeof(old_seller_name));
+    tcmg_strlcpy(old_seller_type, g_cfg.seller_type, sizeof(old_seller_type));
+    tcmg_strlcpy(old_seller_host, g_cfg.seller_host, sizeof(old_seller_host));
 
     if (p->has_newcamd_port) g_cfg.newcamd_port = p->newcamd_port;
     if (p->has_newcamd_bindaddr) tcmg_strlcpy(g_cfg.newcamd_bindaddr, p->newcamd_bindaddr, sizeof(g_cfg.newcamd_bindaddr));
@@ -125,6 +134,10 @@ bool webif_config_apply(const S_WEBIF_CONFIG_PATCH *p, bool *restart_required)
     if (p->has_failban_allowlist) tcmg_strlcpy(g_cfg.failban_allowlist, p->failban_allowlist, sizeof(g_cfg.failban_allowlist));
     if (p->has_failban_max_fails) g_cfg.failban_max_fails = p->failban_max_fails;
     if (p->has_failban_ban_secs) g_cfg.failban_ban_secs = p->failban_ban_secs;
+    if (p->has_seller_name) tcmg_strlcpy(g_cfg.seller_name, p->seller_name, sizeof(g_cfg.seller_name));
+    if (p->has_seller_type) tcmg_strlcpy(g_cfg.seller_type, p->seller_type, sizeof(g_cfg.seller_type));
+    if (p->has_seller_host) tcmg_strlcpy(g_cfg.seller_host, p->seller_host, sizeof(g_cfg.seller_host));
+    if (p->has_seller_port) g_cfg.seller_port = p->seller_port;
 
     bool restart =
         old_webif_enabled != g_cfg.webif_enabled || old_webif_port != g_cfg.webif_port || strcmp(old_webif_bindaddr, g_cfg.webif_bindaddr) != 0 ||
@@ -164,6 +177,10 @@ bool webif_config_apply(const S_WEBIF_CONFIG_PATCH *p, bool *restart_required)
         tcmg_strlcpy(g_cfg.failban_allowlist, old_failban_allowlist, sizeof(g_cfg.failban_allowlist));
         g_cfg.failban_max_fails = old_failban_max_fails;
         g_cfg.failban_ban_secs = old_failban_ban_secs;
+        tcmg_strlcpy(g_cfg.seller_name, old_seller_name, sizeof(g_cfg.seller_name));
+        tcmg_strlcpy(g_cfg.seller_type, old_seller_type, sizeof(g_cfg.seller_type));
+        tcmg_strlcpy(g_cfg.seller_host, old_seller_host, sizeof(g_cfg.seller_host));
+        g_cfg.seller_port = old_seller_port;
         pthread_rwlock_unlock(&g_cfg.acc_lock);
     } else {
         if (restart_required) *restart_required = restart;
@@ -235,6 +252,7 @@ done:
 
 static bool validate_reader_editor_text(const char *content, char *err, size_t errsz)
 {
+    /* old_ecm_trigger / old_ecm_interval are legacy keys: still accepted, ignored by the loader. */
     static const char *const keys[] = {
         "label", "protocol", "enabled", "device", "user", "password", "group", "caid", "ident",
         "sid_whitelist", "ecmwhitelist", "inactivitytimeout", "do_ecm", "fast_reset", "fast_reset_idle",

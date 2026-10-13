@@ -85,25 +85,17 @@ void send_page_failban(int fd, const char *qs)
 	time_t now = time(NULL);
 
 	pos = buf_printf(&buf, &bsz, pos,
-		"<section class='utoolbar center' aria-label='Fail-Ban toolbar'>"
-		"<div class='tgrp'>"
+		"<section class='fbhead' aria-label='Fail-Ban summary'>"
+		"<div class='fbstats' id='fbStats'>"
+		"<span>Active bans<b class='%s'>%d</b></span>"
+		"<span>Max fails<b>%d</b></span>"
+		"<span>Ban duration<b>%s</b></span>"
+		"</div>"
 		"<button type='button' class='tool danger' id='fbClearAll'%s>"
 		ICON("i-trash") "Clear All</button>"
-		"</div></section>",
+		"</section>",
+		total_bans > 0 ? "tr" : "tg", total_bans, max_fails, ban_duration,
 		total_bans > 0 ? "" : " hidden");
-
-	pos = buf_printf(&buf, &bsz, pos,
-		"<div class='sbar' id='fbStats'>"
-		"<div class='sbar-item'><div class='sbl'>Active Bans</div>"
-		"  <div class='sbv%s'>%d</div></div>"
-		"<div class='sbar-item'><div class='sbl'>Max Fails</div>"
-		"  <div class='sbv sm'>%d</div></div>"
-		"<div class='sbar-item'><div class='sbl'>Ban Duration</div>"
-		"  <div class='sbv sm'>%s</div></div>"
-		"</div>",
-		total_bans > 0 ? " tr" : " tg", total_bans,
-		max_fails,
-		ban_duration);
 
 	pos = buf_printf(&buf, &bsz, pos,
 		"<div class='tw cm auto'><table>"

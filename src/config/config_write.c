@@ -72,7 +72,7 @@ bool cfg_build_global_text(const S_CONFIG*c,char*buf,size_t cap)
 {
     size_t p=0;bool ok=cfg_appendf(buf,cap,&p,"# TCMG global configuration\n\n[global]\nsocket_timeout = %d\nserver_keepalive = %d\nserver_keepalive_misses = %d\necm_log = %d\nscheduled_restart = %d\nscheduled_restart_time = %02d:%02d\nlogfile = %s\nusrfile = %s\n\n[webif]\nenabled = %d\nport = %d\nrefresh = %d\nuser = %s\npassword = %s\nbindaddr = %s\n\n[newcamd]\nport = %d\nbindaddr = %s\nkey = ",c->sock_timeout,c->server_keepalive,c->server_keepalive_misses,c->ecm_log,c->scheduled_restart_enabled,c->scheduled_restart_minutes/60,c->scheduled_restart_minutes%60,c->logfile,c->usrfile,c->webif_enabled,c->webif_port,c->webif_refresh,c->webif_user,c->webif_pass,c->webif_bindaddr,c->newcamd_port,c->newcamd_bindaddr);
     for(int i=0;i<14&&ok;i++)ok=cfg_appendf(buf,cap,&p,"%02X",c->newcamd_key[i]);
-    ok=ok&&cfg_appendf(buf,cap,&p,"\nkeepalive = %d\nmode = %s\n\n[cccam]\nport = %d\nbindaddr = %s\n\n[cs378x]\nport = %d\nbindaddr = %s\n\n[failban]\nenabled = %d\nallowlist = %s\nmax_fails = %d\nban_secs = %d\n",c->newcamd_keepalive,c->newcamd_mgclient?"mgcamd":"auto",c->cccam_port,c->cccam_bindaddr,c->cs378x_port,c->cs378x_bindaddr,c->failban_enabled,c->failban_allowlist,c->failban_max_fails,c->failban_ban_secs);return ok;
+    ok=ok&&cfg_appendf(buf,cap,&p,"\nkeepalive = %d\nmode = %s\n\n[cccam]\nport = %d\nbindaddr = %s\n\n[cs378x]\nport = %d\nbindaddr = %s\n\n[failban]\nenabled = %d\nallowlist = %s\nmax_fails = %d\nban_secs = %d\n\n[seller]\nname = %s\ntype = %s\nhost = %s\nport = %d\n",c->newcamd_keepalive,c->newcamd_mgclient?"mgcamd":"auto",c->cccam_port,c->cccam_bindaddr,c->cs378x_port,c->cs378x_bindaddr,c->failban_enabled,c->failban_allowlist,c->failban_max_fails,c->failban_ban_secs,c->seller_name,c->seller_type,c->seller_host,c->seller_port);return ok;
 }
 
 bool cfg_build_user_text(const S_CONFIG *c, char *buf, size_t cap)
@@ -131,11 +131,10 @@ bool cfg_build_server_text(const S_CONFIG *c, char *buf, size_t cap)
         if (reader_protocol_kind(r->protocol) == READER_PROTOCOL_CARD) {
             const char *maintenance = r->maintenance_mode == TCMG_READER_MAINT_OLD_ECM ? "old_ecm" : "fast_reset";
             const char *source = r->old_ecm_source == TCMG_OLD_ECM_SOURCE_MANUAL ? "manual" : "auto";
-            const char *trigger = r->old_ecm_trigger == TCMG_OLD_ECM_TRIGGER_SUCCESSES ? "successes" : "interval";
             ok = ok && cfg_appendf(buf, cap, &pos,
-                               "device = %s\nmaintenance_mode = %s\nfast_reset = %d\nfast_reset_idle = %d\nold_ecm_source = %s\nold_ecm_trigger = %s\nold_ecm_interval = %d\nold_ecm_successes = %d\nold_ecm = %s\n",
-                               r->device, maintenance, r->fast_reset, r->fast_reset_idle, source, trigger,
-                               r->old_ecm_interval, r->old_ecm_successes, r->old_ecm);
+                               "device = %s\nmaintenance_mode = %s\nfast_reset = %d\nfast_reset_idle = %d\nold_ecm_source = %s\nold_ecm_successes = %d\nold_ecm = %s\n",
+                               r->device, maintenance, r->fast_reset, r->fast_reset_idle, source,
+                               r->old_ecm_successes, r->old_ecm);
             if (strcasecmp(r->protocol, "pcsc") == 0 ||
                 strcasecmp(r->protocol, "serial") == 0) {
                 ok = ok && cfg_appendf(buf, cap, &pos, "poll_ms = %d\n", r->poll_ms);

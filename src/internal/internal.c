@@ -1056,8 +1056,8 @@ static void *internal_reader_worker(void *arg)
         } else {
             const int64_t now_ms = mono_ms();
             if (s->ready) {
-                reader_old_ecm_sync(&s->old_ecm, &cfg, now_ms);
-                reader_old_ecm_bind(&s->old_ecm, &cfg, s->device, s->atr, s->atr_len, now_ms);
+                reader_old_ecm_sync(&s->old_ecm, &cfg);
+                reader_old_ecm_bind(&s->old_ecm, &cfg, s->device, s->atr, s->atr_len);
             } else {
                 reader_old_ecm_unbind(&s->old_ecm);
             }
@@ -1100,25 +1100,24 @@ static void *internal_reader_worker(void *arg)
                     tcmg_log("reader[%d]: %s reset failed backend=%s device=%s", index + 1, reason,
                              internal_backend_name(&s->backend), s->device);
                 if (s->ready) {
-                    reader_old_ecm_sync(&s->old_ecm, &cfg, mono_ms());
-                    reader_old_ecm_bind(&s->old_ecm, &cfg, s->device, s->atr, s->atr_len, mono_ms());
+                    reader_old_ecm_sync(&s->old_ecm, &cfg);
+                    reader_old_ecm_bind(&s->old_ecm, &cfg, s->device, s->atr, s->atr_len);
                 }
             }
 
             if (cfg.maintenance_mode == TCMG_READER_MAINT_OLD_ECM && s->ready && s->present &&
                 s->queue_count == 0 && s->ecm_active == 0 &&
-                reader_old_ecm_due(&cfg, &s->old_ecm, now_ms, s->ecm_active != 0)) {
+                reader_old_ecm_due(&cfg, &s->old_ecm, s->ecm_active != 0)) {
                 const uint8_t *old_ecm = NULL;
                 size_t old_ecm_len = 0;
                 if (reader_old_ecm_get(&s->old_ecm, &old_ecm, &old_ecm_len) == 0) {
                     uint8_t ecm_copy[TCMG_OLD_ECM_MAX_LEN];
                     memcpy(ecm_copy, old_ecm, old_ecm_len);
-                    tcmg_log_dbg(D_READER, "OLD ECM start device=%s source=%s trigger=%s len=%zu",
+                    tcmg_log_dbg(D_READER, "OLD ECM start device=%s source=%s len=%zu",
                                  s->device,
                                  cfg.old_ecm_source == TCMG_OLD_ECM_SOURCE_MANUAL ? "manual" : "auto",
-                                 cfg.old_ecm_trigger == TCMG_OLD_ECM_TRIGGER_SUCCESSES ? "successes" : "interval",
                                  old_ecm_len);
-                    reader_old_ecm_note_attempt(&s->old_ecm, now_ms);
+                    reader_old_ecm_note_attempt(&s->old_ecm);
                     s->ecm_active++;
                     pthread_mutex_unlock(&s->mtx);
 
@@ -1159,10 +1158,10 @@ static void *internal_reader_worker(void *arg)
             int rc = internal_conax_ecm(s, ecm, ecm_len, cw, &recoverable, 1);
             if (rc == 0) {
                 int64_t success_now = mono_ms();
-                reader_old_ecm_sync(&s->old_ecm, &cfg, success_now);
+                reader_old_ecm_sync(&s->old_ecm, &cfg);
                 if (s->ready && s->present)
-                    reader_old_ecm_bind(&s->old_ecm, &cfg, s->device, s->atr, s->atr_len, success_now);
-                reader_old_ecm_note_success(&s->old_ecm, &cfg, ecm, ecm_len, success_now);
+                    reader_old_ecm_bind(&s->old_ecm, &cfg, s->device, s->atr, s->atr_len);
+                reader_old_ecm_note_success(&s->old_ecm, &cfg, ecm, ecm_len);
             }
 
             if (rc < 0 && recoverable) {

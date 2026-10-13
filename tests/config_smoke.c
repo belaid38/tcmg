@@ -88,7 +88,6 @@ static int load_case(const char *dir, const char *global, const char *users, con
         if (strstr(readers, "maintenance_mode = old_ecm")) {
             if (cfg.readers[5].maintenance_mode != TCMG_READER_MAINT_OLD_ECM ||
                 cfg.readers[5].old_ecm_source != TCMG_OLD_ECM_SOURCE_MANUAL ||
-                cfg.readers[5].old_ecm_trigger != TCMG_OLD_ECM_TRIGGER_SUCCESSES ||
                 cfg.readers[5].old_ecm_successes != 7 ||
                 strcmp(cfg.readers[5].old_ecm, "817034703264216EB6EFA65A38468DA2AC005F1CC011508CA82E3E4E0F74462096EE21A7F0DD1E57DD46FF3C5133886CB0861005D9E89C") != 0) {
                 fprintf(stderr, "old ECM config parse mismatch\n");
@@ -126,7 +125,6 @@ static int load_case(const char *dir, const char *global, const char *users, con
         if (strstr(readers, "maintenance_mode = old_ecm")) {
             if (roundtrip.readers[5].maintenance_mode != TCMG_READER_MAINT_OLD_ECM ||
                 roundtrip.readers[5].old_ecm_source != TCMG_OLD_ECM_SOURCE_MANUAL ||
-                roundtrip.readers[5].old_ecm_trigger != TCMG_OLD_ECM_TRIGGER_SUCCESSES ||
                 roundtrip.readers[5].old_ecm_successes != 7 ||
                 strcmp(roundtrip.readers[5].old_ecm, "817034703264216EB6EFA65A38468DA2AC005F1CC011508CA82E3E4E0F74462096EE21A7F0DD1E57DD46FF3C5133886CB0861005D9E89C") != 0) {
                 fprintf(stderr, "old ECM config roundtrip failed\n");
@@ -277,7 +275,7 @@ int main(void)
         "[reader]\nlabel = newcamd\nprotocol = newcamd\nenabled = 0\ngroup = 1\ndevice = 127.0.0.1,15050\nuser = client\nkey = 0102030405060708091011121314\n"
         "[reader]\nlabel = mgcamd\nprotocol = mgcamd\nenabled = 0\ngroup = 1\ndevice = 127.0.0.1,15050\nuser = client\nkey = 0102030405060708091011121314\n"
         "[reader]\nlabel = cs378x\nprotocol = cs378x\nenabled = 0\ngroup = 1\ndevice = 127.0.0.1,15052\n"
-        "[reader]\nlabel = internal-sci\nprotocol = internal\nenabled = 0\ngroup = 1\ndevice = /dev/sci0\ndo_ecm = 1\nmaintenance_mode = old_ecm\nold_ecm_source = manual\nold_ecm_trigger = successes\nold_ecm_successes = 7\necmwhitelist = 37\nold_ecm = 817034703264216EB6EFA65A38468DA2AC005F1CC011508CA82E3E4E0F74462096EE21A7F0DD1E57DD46FF3C5133886CB0861005D9E89C\nfast_reset = 1\npoll_ms = 100\n";
+        "[reader]\nlabel = internal-sci\nprotocol = internal\nenabled = 0\ngroup = 1\ndevice = /dev/sci0\ndo_ecm = 1\nmaintenance_mode = old_ecm\nold_ecm_source = manual\nold_ecm_trigger = interval\nold_ecm_interval = 30\nold_ecm_successes = 7\necmwhitelist = 37\nold_ecm = 817034703264216EB6EFA65A38468DA2AC005F1CC011508CA82E3E4E0F74462096EE21A7F0DD1E57DD46FF3C5133886CB0861005D9E89C\nfast_reset = 1\npoll_ms = 100\n";
     if (!mkdtemp(dir)) { perror("mkdtemp"); return 2; }
     if (!run_first_start_defaults(dir)) { fprintf(stderr, "first-start defaults test failed\n"); return 9; }
     if (!load_case(dir, global, users, readers, NULL)) return 3;

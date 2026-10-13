@@ -95,11 +95,11 @@ if internal_idx >= 0:
     st,_,j=req("POST",f"/api/reader/delete?index={internal_idx}"); ok("internal reader cleanup",st==200 and j.get("ok"),j)
 old_ecm_value="817034703264216EB6EFA65A38468DA2AC005F1CC011508CA82E3E4E0F74462096EE21A7F0DD1E57DD46FF3C5133886CB0861005D9E89C"
 for _proto in ["pcsc","internal","serial"]:
-    _d={"index":"-1","label":"Old ECM "+_proto,"protocol":_proto,"enabled":"0","device":"/dev/test","user":"","password":"","key":"","inactivitytimeout":"30","caid":"0B00","sid_whitelist":"","ecmwhitelist":"37","group":"1","ecmkeys":"","DO_ECM":"1","FAST_RESET":"123","FAST_RESET_IDLE":"45","POLL_MS":"250","MAINTENANCE_MODE":"old_ecm","OLD_ECM_SOURCE":"manual","OLD_ECM_TRIGGER":"successes","OLD_ECM_INTERVAL":"60","OLD_ECM_SUCCESSES":"7","OLD_ECM":old_ecm_value}
+    _d={"index":"-1","label":"Old ECM "+_proto,"protocol":_proto,"enabled":"0","device":"/dev/test","user":"","password":"","key":"","inactivitytimeout":"30","caid":"0B00","sid_whitelist":"","ecmwhitelist":"37","group":"1","ecmkeys":"","DO_ECM":"1","FAST_RESET":"123","FAST_RESET_IDLE":"45","POLL_MS":"250","MAINTENANCE_MODE":"old_ecm","OLD_ECM_SOURCE":"manual","OLD_ECM_SUCCESSES":"7","OLD_ECM":old_ecm_value}
     st,_,j=req("POST","/api/reader/save",_d); ok("add old ECM "+_proto,st==200 and j.get("ok"),j)
     st,_,rj=req("GET","/api/readers"); _idx=next((r.get("index") for r in rj.get("readers",[]) if r.get("label")=="Old ECM "+_proto),-1)
     st,_,j=req("GET",f"/api/reader/get?index={_idx}")
-    ok("old ECM "+_proto+" roundtrip",st==200 and j.get("MAINTENANCE_MODE")=="old_ecm" and j.get("OLD_ECM_SOURCE")=="manual" and j.get("OLD_ECM_TRIGGER")=="successes" and j.get("OLD_ECM_INTERVAL")==60 and j.get("OLD_ECM_SUCCESSES")==7 and j.get("OLD_ECM")==old_ecm_value and ("POLL_MS" not in j if _proto=="internal" else "POLL_MS" in j),j)
+    ok("old ECM "+_proto+" roundtrip",st==200 and j.get("MAINTENANCE_MODE")=="old_ecm" and j.get("OLD_ECM_SOURCE")=="manual" and "OLD_ECM_TRIGGER" not in j and "OLD_ECM_INTERVAL" not in j and j.get("OLD_ECM_SUCCESSES")==7 and j.get("OLD_ECM")==old_ecm_value and ("POLL_MS" not in j if _proto=="internal" else "POLL_MS" in j),j)
     if _idx >= 0:
         st,_,j=req("POST",f"/api/reader/delete?index={_idx}"); ok("delete old ECM "+_proto,st==200 and j.get("ok"),j)
 for k,bad in [("label",dict(reader_base, label="")), ("protocol",dict(reader_base, protocol="bogus")), ("group",dict(reader_base, group="0")), ("ecmwl",dict(reader_base, ecmwhitelist="100")), ("ecmkey",dict(reader_base, ecmkeys="0B00="+"C"*63))]:

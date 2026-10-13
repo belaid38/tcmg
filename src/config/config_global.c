@@ -28,6 +28,10 @@ void cfg_default_runtime(S_CONFIG*c)
     c->failban_enabled=1;
     c->failban_max_fails=BAN_MAX_FAILS;
     c->failban_ban_secs=BAN_SECS;
+    c->seller_name[0]='\0';
+    tcmg_strlcpy(c->seller_type,"cccam",sizeof(c->seller_type));
+    c->seller_host[0]='\0';
+    c->seller_port=0;
 }
 E_CFG_CB_RESULT cfg_global_cb(const char*sec,const S_KV*k,void*ctx,char*err,size_t esz)
 {
@@ -78,6 +82,18 @@ E_CFG_CB_RESULT cfg_global_cb(const char*sec,const S_KV*k,void*ctx,char*err,size
         if(!strcasecmp(k->key,"allowlist")){if(strlen(k->value)>=sizeof(c->failban_allowlist))goto bad;tcmg_strlcpy(c->failban_allowlist,k->value,sizeof(c->failban_allowlist));return CFG_CB_OK;}
         if(!strcasecmp(k->key,"max_fails")){if(!cfg_parse_i32_range(k->value,1,1000,&v))goto bad;c->failban_max_fails=v;return CFG_CB_OK;}
         if(!strcasecmp(k->key,"ban_secs")){if(!cfg_parse_i32_range(k->value,10,604800,&v))goto bad;c->failban_ban_secs=v;return CFG_CB_OK;}
+        goto unknown;
+    }
+    if(!strcasecmp(sec,"seller")){
+        if(!strcasecmp(k->key,"name")){if(strlen(k->value)>=sizeof(c->seller_name))goto bad;tcmg_strlcpy(c->seller_name,k->value,sizeof(c->seller_name));return CFG_CB_OK;}
+        if(!strcasecmp(k->key,"type")){
+            const char*t=k->value;
+            if(strcasecmp(t,"cccam")&&strcasecmp(t,"newcamd")&&strcasecmp(t,"cs378x"))goto bad;
+            for(size_t i=0;i<sizeof(c->seller_type)-1&&t[i];i++)c->seller_type[i]=(char)tolower((unsigned char)t[i]),c->seller_type[i+1]='\0';
+            return CFG_CB_OK;
+        }
+        if(!strcasecmp(k->key,"host")){if(strlen(k->value)>=sizeof(c->seller_host))goto bad;tcmg_strlcpy(c->seller_host,k->value,sizeof(c->seller_host));return CFG_CB_OK;}
+        if(!strcasecmp(k->key,"port")){if(!cfg_parse_i32_range(k->value,0,65535,&v))goto bad;c->seller_port=v;return CFG_CB_OK;}
         goto unknown;
     }
     snprintf(err,esz,"line %d unknown section [%s]",k->line,sec);

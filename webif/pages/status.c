@@ -6,26 +6,22 @@
 #include "../internal/proto.h"
 
 static int emit_stat_card(char **buf, int *bsz, int pos,
-                          const char *color, const char *icon,
-                          const char *label, const char *sv_id,
-                          const char *value, const char *sub,
-                          const char *extra)
+                          const char *color, const char *label,
+                          const char *sv_id, const char *value,
+                          const char *sub, const char *extra)
 {
-	pos = buf_printf(buf, bsz, pos,
+	return buf_printf(buf, bsz, pos,
 		"<div class='sc %s'>"
-		"<div class='si_'>%s</div>"
-		"<div class='sb_'>"
-		"  <div class='sl_'>%s</div>"
-		"  <div class='sv'%s%s%s>%s</div>"
+		"<div class='sl_'>%s</div>"
+		"<div class='sv'%s%s%s>%s</div>"
 		"%s"
-		"  <div class='sd'>%s</div>"
-		"</div><div class='sg'></div></div>",
-		color, icon, label,
+		"%s%s%s"
+		"</div>",
+		color, label,
 		sv_id ? " id='" : "", sv_id ? sv_id : "", sv_id ? "'" : "",
 		value,
 		extra ? extra : "",
-		sub);
-	return pos;
+		(sub && sub[0]) ? (strstr(sub, "<a ") ? "<div class='sd sd-lnk'>" : "<div class='sd sd-txt'>") : "", (sub && sub[0]) ? sub : "", (sub && sub[0]) ? "</div>" : "");
 }
 
 void send_page_status(int fd)
@@ -41,7 +37,7 @@ void send_page_status(int fd)
 
 	char hbf_extra[192];
 	snprintf(hbf_extra, sizeof(hbf_extra),
-	         "  <div class='hbw' style='margin-top:4px'>"
+	         "  <div class='hbw'>"
 	         "<div class='hbf' id='p_hbf' style='width:%.0f%%'></div></div>",
 	         st.hit_rate);
 
@@ -50,94 +46,49 @@ void send_page_status(int fd)
 
 	pos = buf_printf(&buf, &bsz, pos, "<div class='cg'>");
 
-	pos = emit_stat_card(&buf, &bsz, pos, "bl", ICO_CLOCK,
-	    "Uptime", "p_up", st.uptime_str, "since start", NULL);
+	pos = emit_stat_card(&buf, &bsz, pos, "bl", "Uptime", "p_up",
+	    st.uptime_str, "since start", NULL);
 
 	{
-		char conn_val[16], conn_sub[48];
+		char conn_val[16], conn_sub[64];
 		snprintf(conn_val, sizeof(conn_val), "%d", st.active_conns);
 		snprintf(conn_sub, sizeof(conn_sub), "of <span id='p_acc'>%d</span> accounts", st.naccounts);
-		pos = emit_stat_card(&buf, &bsz, pos,
-		    "gr", ICO_USERS2,
-		    "Active Sessions", "p_conn", conn_val, conn_sub, NULL);
+		pos = emit_stat_card(&buf, &bsz, pos, "gr", "Online", "p_conn",
+		    conn_val, conn_sub, NULL);
+	}
+
+	pos = buf_printf(&buf, &bsz, pos,
+		"<div class='sc am'><div class='sl_'><span class='l-full'>Disabled / Expired</span><span class='l-short'>Off / Exp</span></div>"
+		"<div class='sv'><span id='p_dis'>%d</span> / <span id='p_exp'>%d</span></div>"
+		"<div class='sd sd-txt'>accounts</div></div>", dis_cnt, exp_cnt);
+
+	{
+		char v[24];
+		snprintf(v, sizeof(v), "%lld", (long long)st.ecm_total);
+		pos = emit_stat_card(&buf, &bsz, pos, "vi", "ECM", "p_ecm", v, "requests", NULL);
+		snprintf(v, sizeof(v), "%lld", (long long)st.cw_found);
+		pos = emit_stat_card(&buf, &bsz, pos, "te", "CW Found", "p_hit", v, "successful", NULL);
+		snprintf(v, sizeof(v), "%lld", (long long)st.cw_not);
+		pos = emit_stat_card(&buf, &bsz, pos, "re", "CW Miss", "p_miss", v, "no CW", NULL);
 	}
 
 	{
-		char dis_val[12], exp_val[12];
-		snprintf(dis_val, sizeof(dis_val), "%d", dis_cnt);
-		snprintf(exp_val, sizeof(exp_val), "%d", exp_cnt);
-
-		pos = emit_stat_card(&buf, &bsz, pos,
-		    "am", ICO_KEY,
-		    "Disabled Users", "p_dis", dis_val, "accounts", NULL);
-
-		pos = emit_stat_card(&buf, &bsz, pos,
-		    "pk", ICO_WARN,
-		    "Expired Users", "p_exp", exp_val, "accounts", NULL);
+		char hsub[320];
+		snprintf(hsub, sizeof(hsub),
+		    "<a href='#' class='sd-link' onclick=\"if(confirm('Reset all stats?')){tcmg_api('/api/resetstats',{method:'POST'}).then(function(){if(typeof _poll==='function')_poll();}).catch(function(){});}return false\">reset<span class='lw'> stats</span></a>");
+		pos = emit_stat_card(&buf, &bsz, pos, "cy", "Hit Rate", "p_hr", hrstr, hsub, hbf_extra);
 	}
-
-	{
-		char ecm_val[24];
-		snprintf(ecm_val, sizeof(ecm_val), "%lld", (long long)st.ecm_total);
-		pos = emit_stat_card(&buf, &bsz, pos, "vi", ICO_ZAP,
-		    "ECM Requests", "p_ecm", ecm_val, "total requests", NULL);
-	}
-
-	{
-		char cw_val[24];
-		snprintf(cw_val, sizeof(cw_val), "%lld", (long long)st.cw_found);
-		pos = emit_stat_card(&buf, &bsz, pos, "te", ICO_CHECK,
-		    "CW Found", "p_hit", cw_val, "successful replies", NULL);
-	}
-
-	{
-		char miss_val[24];
-		snprintf(miss_val, sizeof(miss_val), "%lld", (long long)st.cw_not);
-		pos = emit_stat_card(&buf, &bsz, pos,
-		    "re", ICO_X,
-		    "CW Miss", "p_miss", miss_val, "no CW returned", NULL);
-	}
-
-	pos = emit_stat_card(&buf, &bsz, pos, "cy", ICO_PERCENT,
-	    "Hit Rate", "p_hr", hrstr, "successful ECMs", hbf_extra);
 
 	{
 		char ban_val[8];
 		snprintf(ban_val, sizeof(ban_val), "%d", st.nbans);
-		pos = emit_stat_card(&buf, &bsz, pos,
-		    "or", ICO_SHIELD,
-		    "Banned IPs", "p_ban", ban_val,
-		    "<a href='/failban' style='color:inherit;opacity:.7;font-size:11px'>view list &rarr;</a>",
-		    NULL);
+		pos = emit_stat_card(&buf, &bsz, pos, "or", "Banned IPs", "p_ban", ban_val,
+		    "<a href='/failban' class='sd-link'>view<span class='lw'> list</span> &rarr;</a>", NULL);
 	}
-
-	pos = buf_printf(&buf, &bsz, pos,
-		"<div class='sc ind'>"
-		"<div class='si_'>"
-		"<svg width='22' height='22' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8'>"
-		"<polyline points='1 4 1 10 7 10'/>"
-		"<path d='M3.51 15a9 9 0 1 0 .49-4.08'/>"
-		"</svg></div>"
-		"<div class='sb_'>"
-		"  <div class='sl_'>Statistics</div>"
-		"  <div class='sv action-value'>"
-		"    <a href='#' onclick=\"if(confirm('Reset all stats?')){tcmg_api('/api/resetstats',{method:'POST'}).then(function(){if(typeof _poll==='function')_poll();}).catch(function(){});}return false\""
-		"       style='color:inherit;text-decoration:none'>Reset stats</a>"
-		"  </div>"
-		"  <div class='sd'>clear all counters</div>"
-		"</div><div class='sg'></div></div>");
 
 	pos = buf_printf(&buf, &bsz, pos, "</div>");
 
 	pos = buf_printf(&buf, &bsz, pos,
-		"<div class='shd' style='justify-content:center'>"
-		"  <div class='stl'>"
-		"    <svg width='15' height='15' viewBox='0 0 24 24' fill='none' stroke='var(--p)' stroke-width='1.8' style='flex-shrink:0'>"
-		"      <rect x='2' y='3' width='20' height='14' rx='2'/>"
-		"      <line x1='8' y1='21' x2='16' y2='21'/><line x1='12' y1='17' x2='12' y2='21'/>"
-		"    </svg>Active Sessions"
-		"  </div>"
-		"</div>"
 		"<div class='tw cm auto'><table>"
 		"<thead><tr>"
 		"<th style='width:30px' title='Location'>" ICO_GLOBE "</th>"

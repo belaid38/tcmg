@@ -945,10 +945,10 @@ static void *serial_thread(void *arg)
                     if (serial_quick_probe(&s_slots[i]) < 0)
                         tcmg_log_dbg(D_READER, "reader[%d]: quick probe failed device=%s", i + 1, device);
                 }
-                reader_old_ecm_sync(&s_slots[i].old_ecm, cfg, now);
+                reader_old_ecm_sync(&s_slots[i].old_ecm, cfg);
                 if (s_slots[i].ready && s_slots[i].present) {
                     reader_old_ecm_bind(&s_slots[i].old_ecm, cfg, s_slots[i].device,
-                                        s_slots[i].atr, s_slots[i].atr_len, now);
+                                        s_slots[i].atr, s_slots[i].atr_len);
                 } else {
                     reader_old_ecm_unbind(&s_slots[i].old_ecm);
                 }
@@ -957,17 +957,16 @@ static void *serial_thread(void *arg)
                     s_slots[i].ready && s_slots[i].present && s_slots[i].ecm_active == 0) {
                     const uint8_t *old_ecm = NULL;
                     size_t old_ecm_len = 0;
-                    if (reader_old_ecm_due(cfg, &s_slots[i].old_ecm, now, s_slots[i].ecm_active != 0) &&
+                    if (reader_old_ecm_due(cfg, &s_slots[i].old_ecm, s_slots[i].ecm_active != 0) &&
                         reader_old_ecm_get(&s_slots[i].old_ecm, &old_ecm, &old_ecm_len) == 0) {
                         uint8_t ecm_copy[TCMG_OLD_ECM_MAX_LEN];
                         uint8_t cw[16] = {0};
                         memcpy(ecm_copy, old_ecm, old_ecm_len);
-                        tcmg_log_dbg(D_READER, "OLD ECM start device=%s source=%s trigger=%s len=%zu",
+                        tcmg_log_dbg(D_READER, "OLD ECM start device=%s source=%s len=%zu",
                                      s_slots[i].device,
                                      cfg->old_ecm_source == TCMG_OLD_ECM_SOURCE_MANUAL ? "manual" : "auto",
-                                     cfg->old_ecm_trigger == TCMG_OLD_ECM_TRIGGER_SUCCESSES ? "successes" : "interval",
                                      old_ecm_len);
-                        reader_old_ecm_note_attempt(&s_slots[i].old_ecm, now);
+                        reader_old_ecm_note_attempt(&s_slots[i].old_ecm);
                         s_slots[i].ecm_active++;
                         int old_rc = conax_ecm(&s_slots[i], ecm_copy, old_ecm_len, cw, 0);
                         if (s_slots[i].ecm_active > 0) s_slots[i].ecm_active--;
@@ -1117,10 +1116,10 @@ int serial_do_ecm_reader(int index, uint16_t caid,
     }
     if (rc == 0) {
         int64_t success_now = mono_ms();
-        reader_old_ecm_sync(&s->old_ecm, &cfg, success_now);
+        reader_old_ecm_sync(&s->old_ecm, &cfg);
         if (s->ready && s->present)
-            reader_old_ecm_bind(&s->old_ecm, &cfg, s->device, s->atr, s->atr_len, success_now);
-        reader_old_ecm_note_success(&s->old_ecm, &cfg, ecm, ecm_len, success_now);
+            reader_old_ecm_bind(&s->old_ecm, &cfg, s->device, s->atr, s->atr_len);
+        reader_old_ecm_note_success(&s->old_ecm, &cfg, ecm, ecm_len);
     }
     if (failure) {
         if (rc == 0) *failure = READER_FAILURE_NONE;

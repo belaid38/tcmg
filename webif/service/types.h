@@ -82,8 +82,6 @@ typedef struct {
     int poll_ms;
     int maintenance_mode;
     int old_ecm_source;
-    int old_ecm_trigger;
-    int old_ecm_interval;
     int old_ecm_successes;
     char old_ecm[TCMG_OLD_ECM_HEX_LEN + 1];
     int64_t cw_ok;
@@ -155,6 +153,10 @@ typedef struct {
     char failban_allowlist[CFGVAL_LEN];
     int failban_max_fails;
     int failban_ban_secs;
+    char seller_name[CFGVAL_LEN];
+    char seller_type[16];
+    char seller_host[CFGKEY_LEN];
+    int seller_port;
 } S_WEBIF_CONFIG_VIEW;
 
 typedef struct {
@@ -206,6 +208,14 @@ typedef struct {
     int failban_max_fails;
     int has_failban_ban_secs;
     int failban_ban_secs;
+    int has_seller_name;
+    char seller_name[CFGVAL_LEN];
+    int has_seller_type;
+    char seller_type[16];
+    int has_seller_host;
+    char seller_host[CFGKEY_LEN];
+    int has_seller_port;
+    int seller_port;
 } S_WEBIF_CONFIG_PATCH;
 
 typedef struct {
@@ -257,8 +267,6 @@ typedef struct {
     char poll_ms[16];
     char maintenance_mode[24];
     char old_ecm_source[16];
-    char old_ecm_trigger[16];
-    char old_ecm_interval[16];
     char old_ecm_successes[16];
     char old_ecm[TCMG_OLD_ECM_HEX_LEN + 1];
     int index;

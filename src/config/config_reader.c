@@ -15,8 +15,6 @@ S_READER*cfg_reader_new(S_CONFIG*cfg,int index)
         r->fast_reset_idle=300;
         r->maintenance_mode=TCMG_READER_MAINT_FAST_RESET;
         r->old_ecm_source=TCMG_OLD_ECM_SOURCE_AUTO;
-        r->old_ecm_trigger=TCMG_OLD_ECM_TRIGGER_INTERVAL;
-        r->old_ecm_interval=60;
         r->old_ecm_successes=10;
         r->ngroups=1;
         r->groups[0]=1;
@@ -97,8 +95,7 @@ bool cfg_parse_readers(const char*path,S_CONFIG*c,char*err,size_t esz)
         else if(!strcasecmp(key,"fast_reset_idle")){if(!cfg_parse_i32_range(value,0,86400,&v)){fprintf(stderr,"WARNING: %s line %d invalid value for 'fast_reset_idle' ignored\n",path,line_no);continue;}reader->fast_reset_idle=v;}
         else if(!strcasecmp(key,"maintenance_mode")){if(!strcasecmp(value,"fast_reset")) reader->maintenance_mode=TCMG_READER_MAINT_FAST_RESET; else if(!strcasecmp(value,"old_ecm")) reader->maintenance_mode=TCMG_READER_MAINT_OLD_ECM; else {fprintf(stderr,"WARNING: %s line %d invalid value for 'maintenance_mode' ignored\n",path,line_no);continue;}}
         else if(!strcasecmp(key,"old_ecm_source")){if(!strcasecmp(value,"auto")) reader->old_ecm_source=TCMG_OLD_ECM_SOURCE_AUTO; else if(!strcasecmp(value,"manual")) reader->old_ecm_source=TCMG_OLD_ECM_SOURCE_MANUAL; else {fprintf(stderr,"WARNING: %s line %d invalid value for 'old_ecm_source' ignored\n",path,line_no);continue;}}
-        else if(!strcasecmp(key,"old_ecm_trigger")){if(!strcasecmp(value,"interval")) reader->old_ecm_trigger=TCMG_OLD_ECM_TRIGGER_INTERVAL; else if(!strcasecmp(value,"successes")) reader->old_ecm_trigger=TCMG_OLD_ECM_TRIGGER_SUCCESSES; else {fprintf(stderr,"WARNING: %s line %d invalid value for 'old_ecm_trigger' ignored\n",path,line_no);continue;}}
-        else if(!strcasecmp(key,"old_ecm_interval")){if(!cfg_parse_i32_range(value,1,86400,&v)){fprintf(stderr,"WARNING: %s line %d invalid value for 'old_ecm_interval' ignored\n",path,line_no);continue;}reader->old_ecm_interval=v;}
+        else if(!strcasecmp(key,"old_ecm_trigger")||!strcasecmp(key,"old_ecm_interval")){/* legacy keys: the interval trigger was removed; old files still load */}
         else if(!strcasecmp(key,"old_ecm_successes")){if(!cfg_parse_i32_range(value,1,1000000,&v)){fprintf(stderr,"WARNING: %s line %d invalid value for 'old_ecm_successes' ignored\n",path,line_no);continue;}reader->old_ecm_successes=v;}
         else if(!strcasecmp(key,"old_ecm")){size_t len=strlen(value);bool valid=len<=TCMG_OLD_ECM_HEX_LEN&&!(len&1u);for(size_t i=0;valid&&i<len;i++)if(!isxdigit((unsigned char)value[i]))valid=false;if(!valid){fprintf(stderr,"WARNING: %s line %d invalid value for 'old_ecm' ignored\n",path,line_no);continue;}tcmg_strlcpy(reader->old_ecm,value,sizeof(reader->old_ecm));}
         else if(!strcasecmp(key,"poll_ms")){if(!cfg_parse_i32_range(value,25,10000,&v)){fprintf(stderr,"WARNING: %s line %d invalid value for 'poll_ms' ignored\n",path,line_no);continue;}reader->poll_ms=v;}

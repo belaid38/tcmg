@@ -14,19 +14,17 @@ typedef struct {
     uint64_t config_tag;
     uint64_t card_tag;
     uint32_t successful_ecms;
-    int64_t last_run_ms;
 } S_READER_OLD_ECM_STATE;
 
-void reader_old_ecm_sync(S_READER_OLD_ECM_STATE *state, const S_READER *cfg, int64_t now_ms);
+void reader_old_ecm_sync(S_READER_OLD_ECM_STATE *state, const S_READER *cfg);
 void reader_old_ecm_bind(S_READER_OLD_ECM_STATE *state, const S_READER *cfg,
-                         const char *identity, const uint8_t *atr, size_t atr_len, int64_t now_ms);
+                         const char *identity, const uint8_t *atr, size_t atr_len);
 void reader_old_ecm_unbind(S_READER_OLD_ECM_STATE *state);
 int reader_old_ecm_enabled(const S_READER *cfg);
-int reader_old_ecm_due(const S_READER *cfg, const S_READER_OLD_ECM_STATE *state,
-                       int64_t now_ms, int busy);
+int reader_old_ecm_due(const S_READER *cfg, const S_READER_OLD_ECM_STATE *state, int busy);
 void reader_old_ecm_note_success(S_READER_OLD_ECM_STATE *state, const S_READER *cfg,
-                                 const uint8_t *ecm, size_t ecm_len, int64_t now_ms);
-void reader_old_ecm_note_attempt(S_READER_OLD_ECM_STATE *state, int64_t now_ms);
+                                 const uint8_t *ecm, size_t ecm_len);
+void reader_old_ecm_note_attempt(S_READER_OLD_ECM_STATE *state);
 int reader_old_ecm_get(const S_READER_OLD_ECM_STATE *state, const uint8_t **ecm, size_t *ecm_len);
 int reader_old_ecm_parse_hex(const char *text, uint8_t *out, size_t out_cap, size_t *out_len);
 

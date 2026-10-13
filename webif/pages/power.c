@@ -87,26 +87,9 @@ void send_page_power(int fd, const char *qs)
 
 	else {
 		pos = buf_printf(&buf, &bsz, pos,
-			"<div style='display:flex;gap:24px;flex-wrap:wrap;justify-content:center;max-width:600px;margin:40px auto 0'>"
-
-			"<a href='/power?action=restart' class='pw-tile pw-tile-restart' aria-label='Restart server' title='Restart server'>"
-			"  <svg viewBox='0 0 44 44' fill='none'>"
-			"    <circle cx='22' cy='22' r='15' stroke='currentColor' stroke-width='2' stroke-dasharray='3 4' opacity='.35'/>"
-			"    <path d='M30 14a11 11 0 1 0 2.6 10.5' stroke='currentColor' stroke-width='2.4' stroke-linecap='round'/>"
-			"    <path d='M31.5 8.5l1.6 6.5-6.6.9' stroke='currentColor' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/>"
-			"    <circle cx='22' cy='22' r='2.6' fill='currentColor'/>"
-			"  </svg>"
-			"</a>"
-
-			"<a href='/power?action=shutdown' class='pw-tile pw-tile-shutdown' aria-label='Shut down server' title='Shut down server'>"
-			"  <svg viewBox='0 0 44 44' fill='none'>"
-			"    <circle cx='22' cy='22' r='16' stroke='currentColor' stroke-width='1.6' opacity='.18'/>"
-			"    <circle cx='22' cy='22' r='11.5' stroke='currentColor' stroke-width='1.6' opacity='.32'/>"
-			"    <path d='M28.8 13.6a11 11 0 1 1-13.6 0' stroke='currentColor' stroke-width='2.4' stroke-linecap='round'/>"
-			"    <line x1='22' y1='9' x2='22' y2='21' stroke='currentColor' stroke-width='2.6' stroke-linecap='round'/>"
-			"  </svg>"
-			"</a>"
-
+			"<div class='pw-row'>"
+			"<a href='/power?action=restart' class='btn bp'>" ICON("i-refresh") "Restart</a>"
+			"<a href='/power?action=shutdown' class='btn bd_'>" ICON("i-power") "Shut down</a>"
 			"</div>");
 	}
 

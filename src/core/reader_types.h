@@ -8,8 +8,6 @@
 #define TCMG_READER_MAINT_OLD_ECM 1
 #define TCMG_OLD_ECM_SOURCE_AUTO 0
 #define TCMG_OLD_ECM_SOURCE_MANUAL 1
-#define TCMG_OLD_ECM_TRIGGER_INTERVAL 0
-#define TCMG_OLD_ECM_TRIGGER_SUCCESSES 1
 #define TCMG_OLD_ECM_HEX_LEN 498
 
 typedef struct {
@@ -37,8 +35,6 @@ typedef struct {
     int32_t  poll_ms;
     int32_t  maintenance_mode;
     int32_t  old_ecm_source;
-    int32_t  old_ecm_trigger;
-    int32_t  old_ecm_interval;
     int32_t  old_ecm_successes;
     char     old_ecm[TCMG_OLD_ECM_HEX_LEN + 1];
     uint8_t  newcamd_key[14];

@@ -10,7 +10,7 @@
 
 void send_api_config_get(int fd)
 {
-    int bsz = 3072, pos = 0;
+    int bsz = 4096, pos = 0;
     char *buf = (char *)malloc((size_t)bsz);
     if (!buf) { send_json_error(fd, 503, "Service Unavailable", "out of memory"); return; }
 
@@ -21,6 +21,9 @@ void send_api_config_get(int fd)
     key_hex[28] = '\0';
     char esc_bindaddr[256], esc_cs_bind[256], esc_logfile[512], esc_user[256], esc_webif_bind[256];
     char esc_failban_allow[CFGVAL_LEN * 2];
+    char esc_sname[CFGVAL_LEN * 2], esc_shost[CFGKEY_LEN * 2];
+    json_escape(c.seller_name, esc_sname, sizeof(esc_sname));
+    json_escape(c.seller_host, esc_shost, sizeof(esc_shost));
     json_escape(c.newcamd_bindaddr, esc_bindaddr, sizeof(esc_bindaddr));
     json_escape(c.cs378x_bindaddr, esc_cs_bind, sizeof(esc_cs_bind));
     json_escape(c.logfile, esc_logfile, sizeof(esc_logfile));
@@ -33,11 +36,12 @@ void send_api_config_get(int fd)
         "\"cs378x_bindaddr\":\"%s\",\"sock_timeout\":%d,\"server_keepalive\":%d,\"server_keepalive_misses\":%d,"
         "\"ecm_log\":%d,\"scheduled_restart\":%d,\"scheduled_restart_time\":\"%s\",\"logfile\":\"%s\",\"webif_port\":%d,\"webif_refresh\":%d,\"webif_user\":\"%s\","
         "\"webif_bindaddr\":\"%s\",\"failban_enabled\":%d,\"failban_allowlist\":\"%s\","
-        "\"failban_max_fails\":%d,\"failban_ban_secs\":%d}",
+        "\"failban_max_fails\":%d,\"failban_ban_secs\":%d,\"seller_name\":\"%s\",\"seller_type\":\"%s\",\"seller_host\":\"%s\",\"seller_port\":%d}",
         c.newcamd_port, esc_bindaddr, key_hex, (int)c.newcamd_keepalive, (int)c.newcamd_mgclient,
         c.cccam_port, c.cs378x_port, esc_cs_bind, c.sock_timeout, c.server_keepalive,
         c.server_keepalive_misses, (int)c.ecm_log, (int)c.scheduled_restart_enabled, c.scheduled_restart_time, esc_logfile, c.webif_port, c.webif_refresh,
-        esc_user, esc_webif_bind, (int)c.failban_enabled, esc_failban_allow, c.failban_max_fails, (int)c.failban_ban_secs);
+        esc_user, esc_webif_bind, (int)c.failban_enabled, esc_failban_allow, c.failban_max_fails, (int)c.failban_ban_secs,
+        esc_sname, c.seller_type, esc_shost, c.seller_port);
     send_response(fd, 200, "OK", "application/json", buf, pos);
     free(buf);
 }
@@ -104,6 +108,7 @@ void handle_api_config_save(int fd, const char *post_body)
 	char webif_port_s[16], webif_refresh_s[16], scheduled_restart_s[8], scheduled_restart_time_s[16], webif_user[CFGKEY_LEN], webif_pass[CFGKEY_LEN];
 	char webif_bindaddr[MAXIPLEN + 8];
 	char failban_enabled_s[8], failban_allowlist_s[CFGVAL_LEN], failban_maxfails_s[16], failban_bansecs_s[16];
+	char seller_name[CFGVAL_LEN], seller_type[16], seller_host[CFGKEY_LEN], seller_port_s[16];
 
 	fld(&P, "newcamd_port",      newcamd_port_s,   sizeof(newcamd_port_s));
 	fld(&P, "newcamd_bindaddr",  newcamd_bindaddr, sizeof(newcamd_bindaddr));
@@ -129,9 +134,13 @@ void handle_api_config_save(int fd, const char *post_body)
 	fld(&P, "failban_allowlist", failban_allowlist_s, sizeof(failban_allowlist_s));
 	fld(&P, "failban_max_fails", failban_maxfails_s, sizeof(failban_maxfails_s));
 	fld(&P, "failban_ban_secs",  failban_bansecs_s,  sizeof(failban_bansecs_s));
+	fld(&P, "seller_name", seller_name, sizeof(seller_name));
+	fld(&P, "seller_type", seller_type, sizeof(seller_type));
+	fld(&P, "seller_host", seller_host, sizeof(seller_host));
+	fld(&P, "seller_port", seller_port_s, sizeof(seller_port_s));
 
 	long v_newcamd_port = 0, v_ka = 0, v_mgc = 0, v_cccam = 0, v_cs378x = 0, v_sock = 0, v_ska = 0, v_skam = 0, v_ecmlog = 0, v_sched = 0, v_wport = 0, v_wref = 0;
-		long v_fb_enabled = 0, v_fbmax = 0, v_fbsecs = 0;
+		long v_fb_enabled = 0, v_fbmax = 0, v_fbsecs = 0, v_sport = 0;
 	uint8_t k_new[14];
 
 	int h_np  = num(&P, "newcamd_port",      newcamd_port_s,   0, 65535, &v_newcamd_port);
@@ -150,6 +159,7 @@ void handle_api_config_save(int fd, const char *post_body)
 	int h_fbe = num(&P, "failban_enabled", failban_enabled_s, 0, 1, &v_fb_enabled);
 	int h_fbm = num(&P, "failban_max_fails", failban_maxfails_s, 1, 1000, &v_fbmax);
 	int h_fbs = num(&P, "failban_ban_secs",  failban_bansecs_s,  10, 604800, &v_fbsecs);
+	int h_sp  = num(&P, "seller_port", seller_port_s, 0, 65535, &v_sport);
 	int h_k1  = hexkey(&P, "newcamd_key", newcamd_key_s, k_new);
 	ip_ok(&P, "newcamd_bindaddr", newcamd_bindaddr);
 	ip_ok(&P, "webif_bindaddr",   webif_bindaddr);
@@ -157,6 +167,10 @@ void handle_api_config_save(int fd, const char *post_body)
 	text_ok(&P, "webif_user", webif_user);
 	text_ok(&P, "webif_pass", webif_pass);
 	text_ok(&P, "failban_allowlist", failban_allowlist_s);
+	text_ok(&P, "seller_name", seller_name);
+	text_ok(&P, "seller_host", seller_host);
+	if (seller_type[0] && strcmp(seller_type, "cccam") && strcmp(seller_type, "newcamd") && strcmp(seller_type, "cs378x"))
+		bad(&P, "seller_type", "expected cccam, newcamd or cs378x");
 	if (scheduled_restart_time_s[0]) {
 		int hh = -1, mm = -1;
 		if (sscanf(scheduled_restart_time_s, "%d:%d", &hh, &mm) != 2 || hh < 0 || hh > 23 || mm < 0 || mm > 59 || strlen(scheduled_restart_time_s) != 5 || scheduled_restart_time_s[2] != ':')
@@ -202,6 +216,14 @@ void handle_api_config_save(int fd, const char *post_body)
 	tcmg_strlcpy(patch.failban_allowlist, failban_allowlist_s, sizeof(patch.failban_allowlist));
 	patch.has_failban_max_fails = h_fbm; patch.failban_max_fails = (int)v_fbmax;
 	patch.has_failban_ban_secs = h_fbs; patch.failban_ban_secs = (int)v_fbsecs;
+	patch.has_seller_name = seller_name[0] || form_has(post_body, "seller_name");
+	tcmg_strlcpy(patch.seller_name, seller_name, sizeof(patch.seller_name));
+	patch.has_seller_type = seller_type[0] != '\0';
+	tcmg_strlcpy(patch.seller_type, seller_type, sizeof(patch.seller_type));
+	patch.has_seller_host = seller_host[0] || form_has(post_body, "seller_host");
+	tcmg_strlcpy(patch.seller_host, seller_host, sizeof(patch.seller_host));
+	patch.has_seller_port = h_sp || form_has(post_body, "seller_port");
+	patch.seller_port = (int)v_sport;
 
 	bool restart_required = false;
 	if (!webif_config_apply(&patch, &restart_required)) {

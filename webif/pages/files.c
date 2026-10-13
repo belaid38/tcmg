@@ -48,27 +48,19 @@ void send_page_livelog(int fd)
 	int32_t from_id = total > WEB_MAX_LINES_POLL ? total - WEB_MAX_LINES_POLL : 0;
 
 	pos = buf_printf(&buf, &bsz, pos,
-		"<div class='card ll-card'>"
-		"<div class='ll-statusbar'>"
+		"<div class='ll-bar'>"
+		"<div class='ll-controls'>"
+		"<input class='ls' id='filter' name='log_filter' type='search' autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false' inputmode='search' placeholder='Filter&hellip;' oninput='applyFilter()' title='Regex, e.g.: hit|miss' aria-label='Log filter'>"
+		"<button class='btn bg sm' onclick='clearLog()'>" ICO_TRASH " Clear</button>"
+		"<button class='btn bg sm' onclick='prepSave()'><svg viewBox='0 0 24 24' aria-hidden='true'><path d='M12 3v11m0 0 4-4m-4 4-4-4M5 19h14'/></svg> Save</button>"
+		"<label class='ll-chk'><input type='checkbox' id='asc' checked>Scroll</label>"
+		"<label class='ll-chk'><input type='checkbox' id='paused'>Pause</label>"
 		"<div class='ll-meta'><span class='ll-dot'></span><span id='llstate' class='ll-state'>Live</span>"
-		"<span class='ll-meta-sep'>·</span><span id='linecnt' class='ll-mask'>0</span><span class='ll-meta-word'>lines</span>"
-		"<span class='ll-meta-sep'>·</span><span class='ll-meta-word'>mask</span><span id='dbmask' class='ll-mask'>0x%04X</span></div>"
+		"<span class='ll-meta-sep'>&middot;</span><span id='linecnt' class='ll-mask'>0</span><span class='ll-meta-word'>lines</span>"
+		"<span class='ll-meta-sep'>&middot;</span><span id='dbmask' class='ll-mask'>0x%04X</span></div>"
 		"</div>"
-		"<div id='lw' data-next='%d' data-mask='%u'><pre id='lp'>",
-		(unsigned)g_dblevel, total, (unsigned)g_dblevel);
-
-	s_log_emit_ctx c = { &buf, &bsz, pos, 0, 0 };
-	int32_t next_id = total;
-	log_ring_foreach(from_id, WEB_MAX_LINES_POLL, emit_livelog_line, &c, &next_id);
-	pos = c.pos;
-	if (c.failed) { free(buf); send_json_error(fd, 503, "Service Unavailable", "out of memory"); return; }
-
-	pos = buf_printf(&buf, &bsz, pos,
-		"</pre></div>"
-		"<details class='ll-settings'>"
-		"<summary><span>Show settings</span><svg viewBox='0 0 24 24' aria-hidden='true'><polyline points='6 9 12 15 18 9'/></svg></summary>"
-		"<div class='ll-settings-body'>"
-		"<div class='ll-dbrow'><span class='ll-label'>Debug</span>");
+		"<div class='ll-dbrow'><span class='ll-label'>Debug</span>",
+		(unsigned)g_dblevel);
 	for (int i = 0; i < MAX_DEBUG_LEVELS; i++) {
 		uint16_t m = g_dblevel_names[i].mask;
 		pos = buf_printf(&buf, &bsz, pos,
@@ -77,17 +69,19 @@ void send_page_livelog(int fd)
 	}
 	pos = buf_printf(&buf, &bsz, pos,
 		"<a id='dbALL' href='#' class='dt%s' onclick='toggleAll();return false;'>ALL</a>"
-		"</div>"
-		"<div class='ll-controls'>"
-		"<input class='ls' id='filter' name='log_filter' type='search' autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false' inputmode='search' placeholder='Filter&hellip;' oninput='applyFilter()' title='Regex, e.g.: hit|miss' aria-label='Log filter'>"
-		"<button class='btn bg sm' onclick='clearLog()'>" ICO_TRASH " Clear</button>"
-		"<button class='btn bg sm' onclick='prepSave()'><svg viewBox='0 0 24 24' aria-hidden='true'><path d='M12 3v11m0 0 4-4m-4 4-4-4M5 19h14'/></svg> Save</button>"
-		"<label class='ll-chk'><input type='checkbox' id='asc' checked>Scroll</label>"
-		"<label class='ll-chk'><input type='checkbox' id='paused'>Pause</label>"
-		"<span class='ll-limit'>200 max</span>"
-		"</div></div></details>"
-		"</div><script src='/assets/livelog.js?v=%s' defer></script>",
-		(g_dblevel == D_ALL) ? " on" : "", TCMG_ASSET_REV);
+		"</div></div>"
+		"<div id='lw' data-next='%d' data-mask='%u'><pre id='lp'>",
+		(g_dblevel == D_ALL) ? " on" : "", total, (unsigned)g_dblevel);
+
+	s_log_emit_ctx c = { &buf, &bsz, pos, 0, 0 };
+	int32_t next_id = total;
+	log_ring_foreach(from_id, WEB_MAX_LINES_POLL, emit_livelog_line, &c, &next_id);
+	pos = c.pos;
+	if (c.failed) { free(buf); send_json_error(fd, 503, "Service Unavailable", "out of memory"); return; }
+
+	pos = buf_printf(&buf, &bsz, pos,
+		"</pre></div><script src='/assets/livelog.js?v=%s' defer></script>",
+		TCMG_ASSET_REV);
 
 	pos = emit_footer(&buf, &bsz, pos);
 	PAGE_SEND_AND_FREE(fd);

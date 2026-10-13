@@ -426,28 +426,27 @@ static void *pcsc_thread(void *arg)
                 if (!s_readers[target_idx].present) {
                     reader_old_ecm_unbind(&s_old_ecm[i]);
                 } else {
-                    reader_old_ecm_sync(&s_old_ecm[i], cfg, now_ms);
+                    reader_old_ecm_sync(&s_old_ecm[i], cfg);
                     reader_old_ecm_bind(&s_old_ecm[i], cfg, s_readers[target_idx].name,
-                                        s_readers[target_idx].atr, s_readers[target_idx].atr_len, now_ms);
+                                        s_readers[target_idx].atr, s_readers[target_idx].atr_len);
                 }
 
                 int card_idx = pcsc_card_slot_locked(s_readers[target_idx].name);
                 int busy = card_idx >= 0 && card_idx < TCMG_PCSC_MAX_READERS && atomic_load(&s_ecm_active[card_idx]) != 0;
                 if (cfg->maintenance_mode == TCMG_READER_MAINT_OLD_ECM &&
                     s_readers[target_idx].present && !busy &&
-                    reader_old_ecm_due(cfg, &s_old_ecm[i], now_ms, busy)) {
+                    reader_old_ecm_due(cfg, &s_old_ecm[i], busy)) {
                     const uint8_t *old_ecm = NULL;
                     size_t old_ecm_len = 0;
                     if (reader_old_ecm_get(&s_old_ecm[i], &old_ecm, &old_ecm_len) == 0) {
                         uint8_t ecm_copy[TCMG_OLD_ECM_MAX_LEN];
                         uint8_t cw[CW_LEN] = {0};
                         memcpy(ecm_copy, old_ecm, old_ecm_len);
-                        tcmg_log_dbg(D_READER, "OLD ECM start reader='%s' source=%s trigger=%s len=%zu",
+                        tcmg_log_dbg(D_READER, "OLD ECM start reader='%s' source=%s len=%zu",
                                      s_readers[target_idx].name,
                                      cfg->old_ecm_source == TCMG_OLD_ECM_SOURCE_MANUAL ? "manual" : "auto",
-                                     cfg->old_ecm_trigger == TCMG_OLD_ECM_TRIGGER_SUCCESSES ? "successes" : "interval",
                                      old_ecm_len);
-                        reader_old_ecm_note_attempt(&s_old_ecm[i], now_ms);
+                        reader_old_ecm_note_attempt(&s_old_ecm[i]);
                         int active_idx = -1;
                         int old_rc = -1;
                         int64_t old_t0 = tcmg_mono_ms();
@@ -754,11 +753,11 @@ static int pcsc_note_old_ecm_success_locked(const char *reader, const uint8_t *e
             match = end && *end == '\0' && idx == target_idx;
         }
         if (!match) continue;
-        reader_old_ecm_sync(&s_old_ecm[i], cfg, now_ms);
+        reader_old_ecm_sync(&s_old_ecm[i], cfg);
         if (s_readers[target_idx].present)
             reader_old_ecm_bind(&s_old_ecm[i], cfg, reader, s_readers[target_idx].atr,
-                                s_readers[target_idx].atr_len, now_ms);
-        reader_old_ecm_note_success(&s_old_ecm[i], cfg, ecm, ecm_len, now_ms);
+                                s_readers[target_idx].atr_len);
+        reader_old_ecm_note_success(&s_old_ecm[i], cfg, ecm, ecm_len);
     }
     return 0;
 }

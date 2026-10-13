@@ -304,6 +304,7 @@ void send_page_users(int fd)
 
 		pos = buf_printf(&buf, &bsz, pos,
 			"<td class='c-btn'><div class='ba'>"
+			"<button type='button' class='act-b sh' data-a='card' title='Subscription card (share / save PNG)' aria-label='Subscription card'>" ICON("i-share") "</button>"
 			"<button type='button' class='act-b rs' data-a='reset' title='Reset statistics' aria-label='Reset statistics'>" ICON("i-rotate-ccw") "</button>"
 			"<button type='button' class='act-b dl' data-a='del' title='Delete' aria-label='Delete user'>" ICON("i-trash-2") "</button>"
 			"</div></td></tr>");
@@ -330,12 +331,12 @@ void send_page_users(int fd)
 		"<input class='fi mono' id='em_unew' placeholder='new_user' autocomplete='off' spellcheck='false'></div>"
 		"<div class='fg'><label class='fld' for='em_pass'>Password</label>"
 		"<input class='fi mono' id='em_pass' type='text' autocomplete='off' spellcheck='false'></div>"
-		"<div class='fg'><label class='fld' for='em_caid'>CAIDs (hex, comma-separated)</label>"
+		"<div class='fg'><label class='fld' for='em_caid'>CAIDs</label>"
 		"<input class='fi mono' id='em_caid' maxlength='64' placeholder='0B00,0B01,0604' autocomplete='off' spellcheck='false' style='text-transform:uppercase'>"
 		"</div>");
 
 	pos = buf_printf(&buf, &bsz, pos,
-		"<div class='fg'><label class='fld' for='em_ident'>IDENT (CAID:PROVID)</label>"
+		"<div class='fg'><label class='fld' for='em_ident'>IDENT</label>"
 		"<input class='fi mono' id='em_ident' maxlength='256' placeholder='0B00:000001,0B00:000002' autocomplete='off' spellcheck='false' style='text-transform:uppercase'>"
 		"</div>"
 		"<div class='user-g3'>"
@@ -345,21 +346,21 @@ void send_page_users(int fd)
 		"<input class='fi mono' id='em_maxconn' type='number' min='0' value='0' placeholder='0 = unlimited'></div>"
 		"</div>"
 
-		"<div class='fg' style='margin-top:2px'>"
+		"<div class='fg wide'>"
 		"<label class='user-enable'><span>Anti-sharing protection</span>"
 		"<button type='button' class='sw' id='em_as_enabled' role='switch' aria-checked='false'"
 		" aria-label='Anti-sharing protection' data-a='sw-as'><i></i></button></label>"
 		"</div>"
 		"<div class='user-g3' id='em_as_fields' hidden>"
-		"<div class='fg'><label class='fld' for='em_as_sids'>Max active channels</label>"
+		"<div class='fg'><label class='fld' for='em_as_sids'>Max channels</label>"
 		"<input class='fi mono' id='em_as_sids' type='number' min='1' max='32' value='1'></div>"
-		"<div class='fg'><label class='fld' for='em_as_ecm'>ECM rate limit</label>"
+		"<div class='fg'><label class='fld' for='em_as_ecm'>ECM limit</label>"
 		"<input class='fi mono' id='em_as_ecm' type='number' min='0' max='100000' value='0' placeholder='0 = no limit'></div>"
-		"<div class='fg'><label class='fld' for='em_as_window'>ECM rate window (seconds)</label>"
+		"<div class='fg'><label class='fld' for='em_as_window'>ECM window (s)</label>"
 		"<input class='fi mono' id='em_as_window' type='number' min='1' max='3600' value='60'></div>"
-		"<div class='fg'><label class='fld' for='em_as_timeout'>Active channel timeout (seconds)</label>"
+		"<div class='fg'><label class='fld' for='em_as_timeout'>Channel timeout (s)</label>"
 		"<input class='fi mono' id='em_as_timeout' type='number' min='1' max='3600' value='15'></div>"
-		"<div class='fg'><label class='fld' for='em_as_delay'>Suspicious activity delay (seconds)</label>"
+		"<div class='fg'><label class='fld' for='em_as_delay'>Delay (s)</label>"
 		"<input class='fi mono' id='em_as_delay' type='number' min='0' max='30' value='1'></div>"
 		""
 		"</div>"

@@ -48,6 +48,11 @@ typedef struct {
     char      failban_allowlist[CFGVAL_LEN];
     int32_t   failban_max_fails;
     int32_t   failban_ban_secs;
+
+    char      seller_name[CFGVAL_LEN];
+    char      seller_type[16];
+    char      seller_host[CFGKEY_LEN];
+    int32_t   seller_port;
 } S_CONFIG;
 
 #endif

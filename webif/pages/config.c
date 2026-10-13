@@ -36,242 +36,101 @@ void send_page_config(int fd)
 	html_escape(cfg.webif_pass, esc_wi_pass, sizeof(esc_wi_pass));
 		html_escape(cfg.failban_allowlist, esc_failban_allow, sizeof(esc_failban_allow));
 
+	char esc_sname[CFGVAL_LEN * 6], esc_shost[CFGKEY_LEN * 6];
+	html_escape(cfg.seller_name, esc_sname, sizeof(esc_sname));
+	html_escape(cfg.seller_host, esc_shost, sizeof(esc_shost));
+
+#define CFG_NUM(id, label, mn, mx, fmt, cls) \
+	"<div class='cfg-field" cls "'><label class='cfg-label' for='" id "'>" label "</label>" \
+	"<input class='cfg-input mono' id='" id "' type='number' min='" mn "' max='" mx "' value='" fmt "'></div>"
+#define CFG_TXT(id, label, ph, cls) \
+	"<div class='cfg-field" cls "'><label class='cfg-label' for='" id "'>" label "</label>" \
+	"<input class='cfg-input mono' id='" id "' placeholder='" ph "' autocomplete='off' value='%s'></div>"
+#define CFG_CHK(id, label) \
+	"<label class='cfg-toggle'><input type='checkbox' id='" id "'%s> " label "</label>"
+
 	pos = buf_printf(&buf, &bsz, pos,
-		"<style>"
-		".cfg-page{max-width:920px;margin:0 auto;padding-bottom:16px}"
-		".cfg-card{background:var(--s1);border:1px solid var(--bd);border-radius:var(--r);"
-		"margin-bottom:14px;overflow:hidden}"
-		".cfg-head{padding:14px 18px;background:var(--s2);border-bottom:1px solid var(--bd);"
-		"display:flex;align-items:center;justify-content:space-between;gap:14px}"
-		".cfg-head-main{min-width:0}"
-		".cfg-title{font-size:14px;font-weight:700;color:var(--t0)}"
-		".cfg-body{padding:16px 18px}"
-		".cfg-grid{display:flex;flex-direction:column;gap:0}"
-		".cfg-grid.one{display:flex;flex-direction:column}"
-		".cfg-field{min-width:0;display:grid;grid-template-columns:190px minmax(0,1fr);align-items:center;gap:16px;padding:8px 0;border-bottom:1px solid rgba(56,58,65,.65)}"
-		".cfg-label{display:block;margin:0;font-size:11px;font-weight:650;"
-		"letter-spacing:.04em;color:var(--t1)}"
-		".cfg-input{width:100%%;padding:9px 11px;background:var(--s2);border:1px solid var(--bd2);"
-		"border-radius:var(--rsm);color:var(--t0);font-family:var(--sans);font-size:13px;"
-		"outline:none;transition:border-color .18s,box-shadow .18s;box-sizing:border-box}"
-		".cfg-input.mono{font-family:var(--mono);font-size:12px}"
-		".cfg-input[type=number]{width:104px;max-width:100%%;font-family:var(--mono)}"
-		".cfg-input[type=time]{width:112px;max-width:100%%;font-family:var(--mono)}"
-		".cfg-input[type=date]{width:132px;max-width:100%%}"
-		".cfg-input:focus{border-color:var(--p);box-shadow:0 0 0 3px var(--ps)}"
-		".cfg-input:disabled{opacity:.48;cursor:not-allowed}"
-		".cfg-toggle-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px;padding-top:2px}"
-		".cfg-toggle{display:inline-flex;align-items:center;gap:7px;padding:8px 10px;"
-		"background:var(--s2);border:1px solid var(--bd);border-radius:var(--rsm);"
-		"font-size:12px;color:var(--t0);font-weight:600}"
-		".cfg-toggle input{margin:0;accent-color:var(--p)}"
-		".cfg-divider{height:1px;background:var(--bd);margin:15px 0}"
-		".cfg-msg{display:none;align-items:center;gap:8px;margin-bottom:14px;padding:10px 13px;"
-		"border-radius:var(--rsm);font-size:12px}"
-		".cfg-msg.ok{border:1px solid var(--gr);color:var(--gr);background:var(--grs)}"
-		".cfg-msg.err{border:1px solid var(--re);color:var(--re);background:var(--res)}"
-		".cfg-save{display:flex;justify-content:center;margin:20px 0 4px}"
-		".cfg-save button{min-width:190px;justify-content:center}"
-		""
-		"@media(orientation:portrait){"
-		".cfg-page{padding:0 2px 20px}"
-		".cfg-grid{display:flex;flex-direction:column}"
-		".cfg-field{grid-template-columns:1fr;gap:5px;padding:9px 0}"
-		".cfg-body{padding:14px}"
-		".cfg-head{padding:13px 14px}"
-		".cfg-toggle-row{display:grid;grid-template-columns:minmax(0,1fr)}"
-		".cfg-toggle{width:100%%;box-sizing:border-box}"
-		"}"
-		"</style>"
 		"<div class='cfg-page'>"
 		"<div id='cfgMsg' class='cfg-msg' role='status' aria-live='polite'></div>"
-		"<div class='cfg-tabs' role='tablist' aria-label='Configuration sections'>"
-		"<button type='button' class='cfg-tab act' id='cfgTab-network' role='tab' aria-selected='true' aria-controls='cfgPanel-network' data-cfg-tab='network'>" ICON("i-server") "Connections</button>"
-		"<button type='button' class='cfg-tab' id='cfgTab-web' role='tab' aria-selected='false' aria-controls='cfgPanel-web' data-cfg-tab='web'>" ICON("i-terminal") "WebIF</button>"
-		"<button type='button' class='cfg-tab' id='cfgTab-log' role='tab' aria-selected='false' aria-controls='cfgPanel-log' data-cfg-tab='log'>" ICON("i-activity") "Logging</button>"
-		"<button type='button' class='cfg-tab' id='cfgTab-system' role='tab' aria-selected='false' aria-controls='cfgPanel-system' data-cfg-tab='system'>" ICON("i-sliders") "System</button>"
-		"<button type='button' class='cfg-tab' id='cfgTab-security' role='tab' aria-selected='false' aria-controls='cfgPanel-security' data-cfg-tab='security'>" ICON("i-shield") "Security</button>"
-		"</div><div class='cfg-panels'>"
-		"<section class='cfg-panel' id='cfgPanel-network' role='tabpanel' aria-labelledby='cfgTab-network'>"
-		);
+		"<div class='cfg-cols'><div class='cfg-col'>"
 
-	pos = buf_printf(&buf, &bsz, pos,
-		"<section class='cfg-card'>"
-		"<div class='cfg-head'><div class='cfg-head-main'>"
-		"<div class='cfg-title'>Newcamd / MGcamd / CCcam / CS378X</div>"
-		"</div></div>"
-		"<div class='cfg-body'>"
-		"<div class='cfg-grid'>"
+		"<section class='cfg-card'><div class='cfg-title'>Servers</div><div class='cfg-grid'>"
+		CFG_NUM("cf_newcamd_port", "Newcamd port", "0", "65535", "%d", "")
+		CFG_NUM("cf_cccam_port",   "CCcam port",   "0", "65535", "%d", "")
+		CFG_NUM("cf_cs378x_port",  "CS378X port",  "0", "65535", "%d", "")
+		CFG_TXT("cf_newcamd_bindaddr", "Newcamd bind", "0.0.0.0", "")
+		CFG_TXT("cf_cs378x_bindaddr",  "CS378X bind",  "0.0.0.0", "")
+		CFG_NUM("cf_sock_timeout",  "Socket timeout (s)", "5", "600",  "%d", "")
+		CFG_NUM("cf_server_keepalive", "Keepalive (s)",   "0", "3600", "%d", "")
+		CFG_NUM("cf_server_keepalive_misses", "Keepalive misses", "1", "20", "%d", "")
+		"<div class='cfg-field w3'><label class='cfg-label' for='cf_newcamd_key'>Newcamd DES key</label>"
+		"<input class='cfg-input mono' id='cf_newcamd_key' maxlength='28' spellcheck='false' autocomplete='off' value='%s'></div>"
+		"<div class='cfg-checks w3'>"
+		CFG_CHK("cf_keepalive", "Newcamd keepalive")
+		CFG_CHK("cf_mgclient",  "MGcamd client mode")
+		"</div></div></section>"
 
-		"<div class='cfg-field'>"
-		"<label class='cfg-label' for='cf_newcamd_port'>Newcamd port</label>"
-		"<input class='cfg-input mono' id='cf_newcamd_port' type='number' min='0' max='65535' value='%d'>"
-		"</div>"
+		"<section class='cfg-card'><div class='cfg-title'>Fail-Ban</div><div class='cfg-grid'>"
+		CFG_TXT("cf_failban_allowlist", "Allowlist", "", " w3")
+		CFG_NUM("cf_failban_max_fails", "Max failed attempts", "1", "1000", "%d", " w2")
+		CFG_NUM("cf_failban_ban_secs",  "Ban duration (s)",    "10", "604800", "%d", " w1")
+		"<div class='cfg-checks w3'>" CFG_CHK("cf_failban_enabled", "Enabled") "</div>"
+		"</div></section>"
 
-		"<div class='cfg-field'>"
-		"<label class='cfg-label' for='cf_cccam_port'>CCcam port</label>"
-		"<input class='cfg-input mono' id='cf_cccam_port' type='number' min='0' max='65535' value='%d'>"
-		"</div>"
+		"</div><div class='cfg-col'>"
 
-		"<div class='cfg-field'>"
-		"<label class='cfg-label' for='cf_cs378x_port'>CS378X port</label>"
-		"<input class='cfg-input mono' id='cf_cs378x_port' type='number' min='0' max='65535' value='%d'>"
-		"</div>"
+		"<section class='cfg-card'><div class='cfg-title'>Web interface</div><div class='cfg-grid'>"
+		CFG_NUM("cf_webif_port", "Port", "1", "65535", "%d", "")
+		CFG_TXT("cf_webif_bindaddr", "Bind address", "0.0.0.0", " w2")
+		"<div class='cfg-field'><label class='cfg-label' for='cf_webif_user'>Admin username</label>"
+		"<input class='cfg-input' id='cf_webif_user' autocomplete='off' value='%s'></div>"
+		"<div class='cfg-field'><label class='cfg-label' for='cf_webif_pass'>Admin password</label>"
+		"<input class='cfg-input' id='cf_webif_pass' type='text' autocomplete='off' value='%s'></div>"
+		CFG_NUM("cf_webif_refresh", "Auto-refresh (s)", "0", "3600", "%d", "")
+		"</div></section>"
 
-		"<div class='cfg-field'>"
-		"<label class='cfg-label' for='cf_cs378x_bindaddr'>CS378X bind address</label>"
-		"<input class='cfg-input mono' id='cf_cs378x_bindaddr' placeholder='0.0.0.0' value='%s'>"
-		"</div>"
+		"<section class='cfg-card'><div class='cfg-title'>Logging &amp; restart</div><div class='cfg-grid'>"
+		CFG_TXT("cf_logfile", "Log file", "", " w3")
+		"<div class='cfg-field'><label class='cfg-label' for='cf_restart_time'>Restart time</label>"
+		"<input class='cfg-input mono' id='cf_restart_time' type='time' step='60' value='%s'></div>"
+		"<div class='cfg-checks w2'>"
+		CFG_CHK("cf_ecm_log", "ECM log")
+		CFG_CHK("cf_restart_enabled", "Daily restart")
+		"</div></div></section>"
 
-		"<div class='cfg-field'>"
-		"<label class='cfg-label' for='cf_newcamd_bindaddr'>Newcamd bind address</label>"
-		"<input class='cfg-input mono' id='cf_newcamd_bindaddr' placeholder='0.0.0.0' value='%s'>"
-		"</div>"
+		"<section class='cfg-card'><div class='cfg-title'>Seller &amp; subscription card</div><div class='cfg-grid'>"
+		"<div class='cfg-field w3'><label class='cfg-label' for='cf_seller_name'>Provider name</label>"
+		"<input class='cfg-input' id='cf_seller_name' maxlength='80' autocomplete='off' placeholder='Your service name' value='%s'></div>"
+		"<div class='cfg-field'><label class='cfg-label' for='cf_seller_type'>Server type</label>"
+		"<select class='cfg-input' id='cf_seller_type' onchange='sellerAuto()'>"
+		"<option value='cccam'%s>CCcam</option><option value='newcamd'%s>Newcamd</option><option value='cs378x'%s>CS378X</option></select></div>"
+		"<div class='cfg-field w2'><label class='cfg-label' for='cf_seller_host'>Host</label>"
+		"<input class='cfg-input mono' id='cf_seller_host' maxlength='60' autocomplete='off' spellcheck='false' value='%s'></div>"
+		"</div></section>"
 
-		"<div class='cfg-field'>"
-		"<label class='cfg-label' for='cf_sock_timeout'>Socket timeout</label>"
-		"<input class='cfg-input mono' id='cf_sock_timeout' type='number' min='5' max='600' value='%d'>"
-		"</div>"
-
-		"<div class='cfg-field'>"
-		"<label class='cfg-label' for='cf_server_keepalive'>Server keepalive</label>"
-		"<input class='cfg-input mono' id='cf_server_keepalive' type='number' min='0' max='3600' value='%d'>"
-		"</div>"
-
-		"<div class='cfg-field'>"
-		"<label class='cfg-label' for='cf_server_keepalive_misses'>Keepalive misses</label>"
-		"<input class='cfg-input mono' id='cf_server_keepalive_misses' type='number' min='1' max='20' value='%d'>"
-		"</div>"
-
-		"<div class='cfg-field'>"
-		"<label class='cfg-label' for='cf_newcamd_key'>Newcamd DES key</label>"
-		"<input class='cfg-input mono' id='cf_newcamd_key' maxlength='28' spellcheck='false' "
-		"autocomplete='off' value='%s'>"
-		"</div>"
-		"<div class='cfg-toggle-row'>"
-		"<label class='cfg-toggle'><input type='checkbox' id='cf_keepalive'%s> Keepalive</label>"
-		"<label class='cfg-toggle'><input type='checkbox' id='cf_mgclient'%s> MGcamd client mode</label>"
-		"</div>"
-		"</div></section>",
-		cfg.newcamd_port,
-		cfg.cccam_port,
-		cfg.cs378x_port,
-		esc_cs_bind,
-		esc_nm_bind,
-		cfg.sock_timeout,
-		cfg.server_keepalive,
-		cfg.server_keepalive_misses,
+		"</div></div>",
+		/* Servers */
+		cfg.newcamd_port, cfg.cccam_port, cfg.cs378x_port,
+		esc_nm_bind, esc_cs_bind,
+		cfg.sock_timeout, cfg.server_keepalive, cfg.server_keepalive_misses,
 		key_hex,
 		cfg.newcamd_keepalive ? " checked" : "",
-		cfg.newcamd_mgclient ? " checked" : "");
-	pos = buf_printf(&buf, &bsz, pos, "</section><section class='cfg-panel' id='cfgPanel-web' role='tabpanel' aria-labelledby='cfgTab-web' hidden>");
-
-	pos = buf_printf(&buf, &bsz, pos,
-		"<section class='cfg-card'>"
-		"<div class='cfg-head'><div class='cfg-head-main'>"
-		"<div class='cfg-title'>Web Interface</div>"
-		"</div></div>"
-		"<div class='cfg-body'>"
-		"<div class='cfg-grid'>"
-
-		"<div class='cfg-field'>"
-		"<label class='cfg-label' for='cf_webif_port'>Port</label>"
-		"<input class='cfg-input mono' id='cf_webif_port' type='number' min='1' max='65535' value='%d'>"
-		"</div>"
-
-		"<div class='cfg-field'>"
-		"<label class='cfg-label' for='cf_webif_bindaddr'>Bind address</label>"
-		"<input class='cfg-input mono' id='cf_webif_bindaddr' placeholder='0.0.0.0' value='%s'>"
-		"</div>"
-
-		"<div class='cfg-field'>"
-		"<label class='cfg-label' for='cf_webif_user'>Admin username</label>"
-		"<input class='cfg-input' id='cf_webif_user' autocomplete='off' value='%s'>"
-		"</div>"
-
-		"<div class='cfg-field'>"
-		"<label class='cfg-label' for='cf_webif_pass'>Admin password</label>"
-		"<input class='cfg-input' id='cf_webif_pass' type='text' autocomplete='off' value='%s'>"
-		"</div>"
-
-		"<div class='cfg-field'>"
-		"<label class='cfg-label' for='cf_webif_refresh'>Auto-refresh</label>"
-		"<input class='cfg-input mono' id='cf_webif_refresh' type='number' min='0' max='3600' value='%d'>"
-
-		"</div>"
-		"</div></section>",
-		cfg.webif_port,
-		esc_wi_bind,
-		esc_wi_user,
-		esc_wi_pass,
-		cfg.webif_refresh);
-	pos = buf_printf(&buf, &bsz, pos, "</section><section class='cfg-panel' id='cfgPanel-log' role='tabpanel' aria-labelledby='cfgTab-log' hidden>");
-
-	pos = buf_printf(&buf, &bsz, pos,
-		"<section class='cfg-card'>"
-		"<div class='cfg-head'><div class='cfg-head-main'>"
-		"<div class='cfg-title'>Logging</div>"
-		"</div></div>"
-		"<div class='cfg-body'>"
-		"<div class='cfg-grid'>"
-		"<div class='cfg-field'>"
-		"<label class='cfg-label' for='cf_logfile'>Log file</label>"
-		"<input class='cfg-input mono' id='cf_logfile' value='%s'>"
-		"</div>"
-		"</div>"
-		"<div class='cfg-toggle-row'>"
-		"<label class='cfg-toggle'><input type='checkbox' id='cf_ecm_log'%s> ECM log</label>"
-		"</div>"
-		"</div></section>",
-		esc_logfile,
-		cfg.ecm_log ? " checked" : "");
-	pos = buf_printf(&buf, &bsz, pos, "</section><section class='cfg-panel' id='cfgPanel-system' role='tabpanel' aria-labelledby='cfgTab-system' hidden>");
-
-	pos = buf_printf(&buf, &bsz, pos,
-		"<section class='cfg-card'>"
-		"<div class='cfg-head'><div class='cfg-head-main'>"
-		"<div class='cfg-title'>Scheduled restart</div>"
-		"</div></div>"
-		"<div class='cfg-body'><div class='cfg-grid'>"
-		"<div class='cfg-field'>"
-		"<label class='cfg-label' for='cf_restart_time'>Restart time</label>"
-		"<input class='cfg-input mono' id='cf_restart_time' type='time' step='60' value='%s'>"
-		"</div><div class='cfg-toggle-row'>"
-		"<label class='cfg-toggle'><input type='checkbox' id='cf_restart_enabled'%s> Enable daily restart</label>"
-		"</div></div></section>",
-		cfg.scheduled_restart_time, cfg.scheduled_restart_enabled ? " checked" : "");
-	pos = buf_printf(&buf, &bsz, pos, "</section><section class='cfg-panel' id='cfgPanel-security' role='tabpanel' aria-labelledby='cfgTab-security' hidden>");
-
-	pos = buf_printf(&buf, &bsz, pos,
-		"<section class='cfg-card'>"
-		"<div class='cfg-head'><div class='cfg-head-main'>"
-		"<div class='cfg-title'>Security</div>"
-		"</div></div>"
-		"<div class='cfg-body'>"
-		"<div class='cfg-toggle-row'>"
-		"<label class='cfg-toggle'><input type='checkbox' id='cf_failban_enabled'%s> Enabled</label>"
-		"</div>"
-		"<div class='cfg-grid'>"
-		"<div class='cfg-field'>"
-		"<label class='cfg-label' for='cf_failban_allowlist'>Allowlist</label>"
-		"<input class='cfg-input mono' id='cf_failban_allowlist' value='%s'>"
-		"</div>"
-		"<div class='cfg-field'>"
-		"<label class='cfg-label' for='cf_failban_max_fails'>Maximum failed attempts</label>"
-		"<input class='cfg-input mono' id='cf_failban_max_fails' type='number' min='1' max='1000' value='%d'>"
-		"</div>"
-		"<div class='cfg-field'>"
-		"<label class='cfg-label' for='cf_failban_ban_secs'>Ban duration</label>"
-		"<input class='cfg-input mono' id='cf_failban_ban_secs' type='number' min='10' max='604800' step='1' value='%d'>"
-		"</div>"
-		"</div>"
-		"</div></section>",
+		cfg.newcamd_mgclient ? " checked" : "",
+		/* Fail-Ban */
+		esc_failban_allow, cfg.failban_max_fails, cfg.failban_ban_secs,
 		cfg.failban_enabled ? " checked" : "",
-		esc_failban_allow,
-		cfg.failban_max_fails,
-		cfg.failban_ban_secs);
-
-	pos = buf_printf(&buf, &bsz, pos, "</section></div>");
+		/* Web */
+		cfg.webif_port, esc_wi_bind, esc_wi_user, esc_wi_pass, cfg.webif_refresh,
+		/* Logging & restart */
+		esc_logfile, cfg.scheduled_restart_time,
+		cfg.ecm_log ? " checked" : "",
+		cfg.scheduled_restart_enabled ? " checked" : "",
+		/* Seller */
+		esc_sname,
+		!strcmp(cfg.seller_type, "cccam") ? " selected" : "",
+		!strcmp(cfg.seller_type, "newcamd") ? " selected" : "",
+		!strcmp(cfg.seller_type, "cs378x") ? " selected" : "",
+		esc_shost);
 
 	pos = buf_printf(&buf, &bsz, pos,
 		"<div class='cfg-save'>"
@@ -290,17 +149,16 @@ void send_page_config(int fd)
 		"  e.style.display='flex';"
 		"}"
 
-		"function cfgTab(name){"
-		"  document.querySelectorAll('.cfg-tab').forEach(function(b){var a=b.dataset.cfgTab===name;b.classList.toggle('act',a);b.setAttribute('aria-selected',a?'true':'false');b.tabIndex=a?0:-1;});"
-		"  document.querySelectorAll('.cfg-panel').forEach(function(p){p.hidden=p.id!=='cfgPanel-'+name;});"
-		"}"
-		"document.querySelectorAll('.cfg-tab').forEach(function(b){b.addEventListener('click',function(){cfgTab(b.dataset.cfgTab);});b.addEventListener('keydown',function(e){var a=[].slice.call(document.querySelectorAll('.cfg-tab')),i=a.indexOf(b),n=i;if(e.key==='ArrowRight'||e.key==='ArrowDown')n=(i+1)%%a.length;else if(e.key==='ArrowLeft'||e.key==='ArrowUp')n=(i+a.length-1)%%a.length;else if(e.key==='Home')n=0;else if(e.key==='End')n=a.length-1;else return;e.preventDefault();a[n].focus();cfgTab(a[n].dataset.cfgTab);});});"
 		"function cfgHex28(s){return /^[0-9a-fA-F]{28}$/.test(s);}"
 		"function cfgValidate(){"
 		"  var nk=cfgEl('cf_newcamd_key').value.trim();"
 		"  if(!cfgHex28(nk)){cfgSetMessage(false,'Newcamd DES key must contain 28 hexadecimal characters.');cfgEl('cf_newcamd_key').focus();return false;}"
 		"  return true;"
 		"}"
+		"function sellerAuto(){"
+		"  cfgEl('cf_seller_host').placeholder=location.hostname||'';"
+		"}"
+		"sellerAuto();"
 		"function saveCfg(){"
 		"  if(window._cfgSaving||!cfgValidate())return;"
 		"  window._cfgSaving=true;"
@@ -329,6 +187,9 @@ void send_page_config(int fd)
 		"  p.set('webif_user',cfgEl('cf_webif_user').value);"
 		"  p.set('webif_pass',cfgEl('cf_webif_pass').value);"
 		"  p.set('webif_refresh',cfgEl('cf_webif_refresh').value);"
+		"  p.set('seller_name',cfgEl('cf_seller_name').value.trim());"
+		"  p.set('seller_type',cfgEl('cf_seller_type').value);"
+		"  p.set('seller_host',cfgEl('cf_seller_host').value.trim());"
 		"  p.set(\'failban_enabled\',cfgEl(\'cf_failban_enabled\').checked?\'1\':\'0\');"
 		"  p.set(\'failban_allowlist\',cfgEl(\'cf_failban_allowlist\').value);"
 		"  p.set(\'failban_max_fails\',cfgEl(\'cf_failban_max_fails\').value);"

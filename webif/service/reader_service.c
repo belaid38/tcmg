@@ -74,8 +74,6 @@ static void copy_reader(const S_READER *r, int idx, S_WEBIF_READER_VIEW *v)
     v->poll_ms = r->poll_ms;
     v->maintenance_mode = r->maintenance_mode;
     v->old_ecm_source = r->old_ecm_source;
-    v->old_ecm_trigger = r->old_ecm_trigger;
-    v->old_ecm_interval = r->old_ecm_interval;
     v->old_ecm_successes = r->old_ecm_successes;
     tcmg_strlcpy(v->old_ecm, r->old_ecm, sizeof(v->old_ecm));
     S_READER_STATS_SNAPSHOT stats;
@@ -233,8 +231,6 @@ bool webif_reader_save(const S_WEBIF_READER_EDIT *e)
     value.poll_ms = 250;
     value.maintenance_mode = TCMG_READER_MAINT_FAST_RESET;
     value.old_ecm_source = TCMG_OLD_ECM_SOURCE_AUTO;
-    value.old_ecm_trigger = TCMG_OLD_ECM_TRIGGER_INTERVAL;
-    value.old_ecm_interval = 60;
     value.old_ecm_successes = 10;
     snprintf(value.label, sizeof(value.label), "reader%d", e->index);
     tcmg_strlcpy(value.protocol, "emu", sizeof(value.protocol));
@@ -260,7 +256,7 @@ bool webif_reader_save(const S_WEBIF_READER_EDIT *e)
     if (protocol->kind == READER_PROTOCOL_EMU) {
         value.device[0] = 0; value.user[0] = 0; value.password[0] = 0;
         value.inactivitytimeout = 30; value.fast_reset = 0; value.fast_reset_idle = 300; value.poll_ms = 250;
-        value.maintenance_mode = TCMG_READER_MAINT_FAST_RESET; value.old_ecm_source = TCMG_OLD_ECM_SOURCE_AUTO; value.old_ecm_trigger = TCMG_OLD_ECM_TRIGGER_INTERVAL; value.old_ecm_interval = 60; value.old_ecm_successes = 10; value.old_ecm[0] = 0;
+        value.maintenance_mode = TCMG_READER_MAINT_FAST_RESET; value.old_ecm_source = TCMG_OLD_ECM_SOURCE_AUTO; value.old_ecm_successes = 10; value.old_ecm[0] = 0;
     } else if (protocol->kind == READER_PROTOCOL_CARD) {
         value.user[0] = 0; value.password[0] = 0; value.inactivitytimeout = 30;
         if (parse_simple_i32(e->fast_reset, 0, 86400, &value.fast_reset) < 0) return false;
@@ -271,10 +267,6 @@ bool webif_reader_save(const S_WEBIF_READER_EDIT *e)
         if (!strcasecmp(e->old_ecm_source, "auto")) value.old_ecm_source = TCMG_OLD_ECM_SOURCE_AUTO;
         else if (!strcasecmp(e->old_ecm_source, "manual")) value.old_ecm_source = TCMG_OLD_ECM_SOURCE_MANUAL;
         else return false;
-        if (!strcasecmp(e->old_ecm_trigger, "interval")) value.old_ecm_trigger = TCMG_OLD_ECM_TRIGGER_INTERVAL;
-        else if (!strcasecmp(e->old_ecm_trigger, "successes")) value.old_ecm_trigger = TCMG_OLD_ECM_TRIGGER_SUCCESSES;
-        else return false;
-        if (parse_simple_i32(e->old_ecm_interval, 1, 86400, &value.old_ecm_interval) < 0) return false;
         if (parse_simple_i32(e->old_ecm_successes, 1, 1000000, &value.old_ecm_successes) < 0) return false;
         size_t old_len = strlen(e->old_ecm);
         if (old_len > TCMG_OLD_ECM_HEX_LEN || (old_len & 1u)) return false;

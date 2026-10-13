@@ -126,12 +126,8 @@ bool cfg_validate(S_CONFIG *c, char *err, size_t esz)
                     snprintf(err, esz, "reader[%d] '%s': invalid old ECM source", i, r->label);
                     return false;
                 }
-                if (r->old_ecm_trigger != TCMG_OLD_ECM_TRIGGER_INTERVAL && r->old_ecm_trigger != TCMG_OLD_ECM_TRIGGER_SUCCESSES) {
-                    snprintf(err, esz, "reader[%d] '%s': invalid old ECM trigger", i, r->label);
-                    return false;
-                }
-                if (r->old_ecm_interval < 1 || r->old_ecm_interval > 86400 || r->old_ecm_successes < 1 || r->old_ecm_successes > 1000000) {
-                    snprintf(err, esz, "reader[%d] '%s': invalid old ECM timing", i, r->label);
+                if (r->old_ecm_successes < 1 || r->old_ecm_successes > 1000000) {
+                    snprintf(err, esz, "reader[%d] '%s': invalid old ECM success count", i, r->label);
                     return false;
                 }
                 size_t old_len = strlen(r->old_ecm);

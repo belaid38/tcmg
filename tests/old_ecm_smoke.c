@@ -18,8 +18,6 @@ static void setup(S_READER *r)
     r->enabled = 1;
     r->maintenance_mode = TCMG_READER_MAINT_OLD_ECM;
     r->old_ecm_source = TCMG_OLD_ECM_SOURCE_AUTO;
-    r->old_ecm_trigger = TCMG_OLD_ECM_TRIGGER_INTERVAL;
-    r->old_ecm_interval = 60;
     r->old_ecm_successes = 3;
     r->ecm_whitelist = 0x37;
 }
@@ -36,45 +34,34 @@ int main(void)
     memset(&state, 0, sizeof(state));
     setup(&cfg);
 
-    reader_old_ecm_sync(&state, &cfg, 1000);
+    reader_old_ecm_sync(&state, &cfg);
     failures += expect(!reader_old_ecm_enabled(&(S_READER){0}), "disabled mode");
     failures += expect(reader_old_ecm_enabled(&cfg), "old ecm enabled");
     failures += expect(reader_old_ecm_get(&state, &got, &got_len) != 0, "auto starts without stored ecm");
 
-    reader_old_ecm_bind(&state, &cfg, "/dev/sci0", (const uint8_t *)"ATR-A", 5, 1000);
+    reader_old_ecm_bind(&state, &cfg, "/dev/sci0", (const uint8_t *)"ATR-A", 5);
     failures += expect(reader_old_ecm_get(&state, &got, &got_len) != 0, "auto bind has no stored ecm");
-    reader_old_ecm_note_success(&state, &cfg, ecm_a, sizeof(ecm_a), 2000);
+    reader_old_ecm_note_success(&state, &cfg, ecm_a, sizeof(ecm_a));
     failures += expect(reader_old_ecm_get(&state, &got, &got_len) == 0 && got_len == sizeof(ecm_a) && memcmp(got, ecm_a, sizeof(ecm_a)) == 0,
                        "auto captures first successful ecm");
-    reader_old_ecm_note_success(&state, &cfg, ecm_b, sizeof(ecm_b), 3000);
+    reader_old_ecm_note_success(&state, &cfg, ecm_b, sizeof(ecm_b));
     failures += expect(reader_old_ecm_get(&state, &got, &got_len) == 0 && memcmp(got, ecm_a, sizeof(ecm_a)) == 0,
                        "auto keeps first successful ecm");
-    failures += expect(!reader_old_ecm_due(&cfg, &state, 60999, 0), "interval not due early");
-    failures += expect(reader_old_ecm_due(&cfg, &state, 62000, 0), "interval due");
-    reader_old_ecm_note_attempt(&state, 62000);
-    failures += expect(!reader_old_ecm_due(&cfg, &state, 62001, 0), "attempt restarts interval");
-    failures += expect(!reader_old_ecm_due(&cfg, &state, 120000, 1), "busy blocks old ecm");
-
-    cfg.old_ecm_trigger = TCMG_OLD_ECM_TRIGGER_SUCCESSES;
-    cfg.old_ecm_successes = 3;
-    reader_old_ecm_sync(&state, &cfg, 200000);
-    reader_old_ecm_bind(&state, &cfg, "/dev/sci0", (const uint8_t *)"ATR-A", 5, 200000);
-    reader_old_ecm_note_success(&state, &cfg, ecm_a, sizeof(ecm_a), 200001);
-    failures += expect(!reader_old_ecm_due(&cfg, &state, 200002, 0), "success count one not due");
-    reader_old_ecm_note_success(&state, &cfg, ecm_b, sizeof(ecm_b), 200003);
-    failures += expect(!reader_old_ecm_due(&cfg, &state, 200004, 0), "success count two not due");
-    reader_old_ecm_note_success(&state, &cfg, ecm_b, sizeof(ecm_b), 200005);
-    failures += expect(reader_old_ecm_due(&cfg, &state, 200006, 0), "success count three due");
-    reader_old_ecm_note_attempt(&state, 200006);
-    failures += expect(!reader_old_ecm_due(&cfg, &state, 200007, 0), "success counter resets after attempt");
+    failures += expect(!reader_old_ecm_due(&cfg, &state, 0), "auto two successes not due yet");
+    reader_old_ecm_note_success(&state, &cfg, ecm_b, sizeof(ecm_b));
+    failures += expect(reader_old_ecm_due(&cfg, &state, 0), "auto three successes due");
+    failures += expect(!reader_old_ecm_due(&cfg, &state, 1), "busy blocks old ecm");
+    reader_old_ecm_note_attempt(&state);
+    failures += expect(!reader_old_ecm_due(&cfg, &state, 0), "success counter resets after attempt");
+    reader_old_ecm_note_success(&state, &cfg, ecm_a, sizeof(ecm_a));
+    failures += expect(!reader_old_ecm_due(&cfg, &state, 0), "auto count restarts after attempt");
 
     cfg.old_ecm_source = TCMG_OLD_ECM_SOURCE_MANUAL;
-    cfg.old_ecm_trigger = TCMG_OLD_ECM_TRIGGER_INTERVAL;
-    cfg.old_ecm_interval = 10;
+    cfg.old_ecm_successes = 2;
     cfg.ecm_whitelist = 0x37;
     snprintf(cfg.old_ecm, sizeof(cfg.old_ecm), "%s", MANUAL_ECM);
-    reader_old_ecm_sync(&state, &cfg, 300000);
-    reader_old_ecm_bind(&state, &cfg, "/dev/sci0", (const uint8_t *)"ATR-A", 5, 300000);
+    reader_old_ecm_sync(&state, &cfg);
+    reader_old_ecm_bind(&state, &cfg, "/dev/sci0", (const uint8_t *)"ATR-A", 5);
     failures += expect(reader_old_ecm_get(&state, &got, &got_len) == 0 && got_len == 55,
                        "manual ecm loads");
     if (got_len == 55) {
@@ -84,14 +71,19 @@ int main(void)
                            "manual ecm parses");
         failures += expect(memcmp(parsed, got, 55) == 0, "manual ecm exact bytes");
     }
-    failures += expect(!reader_old_ecm_due(&cfg, &state, 309999, 0), "manual interval not due early");
-    failures += expect(reader_old_ecm_due(&cfg, &state, 310000, 0), "manual interval due");
+    failures += expect(!reader_old_ecm_due(&cfg, &state, 0), "manual not due before any success");
+    reader_old_ecm_note_success(&state, &cfg, ecm_a, sizeof(ecm_a));
+    failures += expect(!reader_old_ecm_due(&cfg, &state, 0), "manual one success not due");
+    reader_old_ecm_note_success(&state, &cfg, ecm_b, sizeof(ecm_b));
+    failures += expect(reader_old_ecm_due(&cfg, &state, 0), "manual two successes due");
+    reader_old_ecm_note_attempt(&state);
+    failures += expect(!reader_old_ecm_due(&cfg, &state, 0), "manual counter resets after attempt");
 
-    reader_old_ecm_bind(&state, &cfg, "/dev/sci0", (const uint8_t *)"ATR-B", 5, 320000);
+    reader_old_ecm_bind(&state, &cfg, "/dev/sci0", (const uint8_t *)"ATR-B", 5);
     failures += expect(reader_old_ecm_get(&state, &got, &got_len) == 0 && got_len == 55,
                        "manual reloads on card change");
     cfg.maintenance_mode = TCMG_READER_MAINT_FAST_RESET;
-    reader_old_ecm_sync(&state, &cfg, 330000);
+    reader_old_ecm_sync(&state, &cfg);
     failures += expect(!reader_old_ecm_enabled(&cfg) && reader_old_ecm_get(&state, &got, &got_len) != 0,
                        "switching to fast reset clears old ecm runtime");
 

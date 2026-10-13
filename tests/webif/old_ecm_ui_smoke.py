@@ -29,13 +29,14 @@ with sync_playwright() as p:
         assert page.locator('#rMaintMode').input_value() == 'fast_reset', proto
         page.locator('#rMaintMode').select_option('old_ecm')
         assert not page.locator('#rOldSourceWrap').is_hidden(), proto
-        assert not page.locator('#rOldTriggerWrap').is_hidden(), proto
+        # the interval trigger was removed: no trigger select, no interval field, only the success count
+        assert page.locator('#rOldTrigger').count() == 0, proto
+        assert page.locator('#rOldInterval').count() == 0, proto
+        assert not page.locator('#rOldSuccessesWrap').is_hidden(), proto
         assert page.locator('#rFastWrap').is_hidden()
         assert page.locator('#rFastIdleWrap').is_hidden()
         page.locator('#rOldSource').select_option('manual')
         assert not page.locator('#rOldEcmWrap').is_hidden(), proto
-        page.locator('#rOldTrigger').select_option('successes')
-        assert page.locator('#rOldIntervalWrap').is_hidden()
         assert not page.locator('#rOldSuccessesWrap').is_hidden()
         page.locator('#rOldEcm').fill(ecm)
         assert page.locator('#rOldEcm').input_value() == ecm
@@ -43,5 +44,6 @@ with sync_playwright() as p:
         assert not page.locator('#rFastWrap').is_hidden()
         assert page.locator('#rOldSourceWrap').is_hidden()
         assert page.locator('#rOldEcmWrap').is_hidden()
+        assert page.locator('#rOldSuccessesWrap').is_hidden()
     print('OLD_ECM_UI_SMOKE: PASS')
     browser.close()
