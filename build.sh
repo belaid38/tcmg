@@ -63,7 +63,6 @@ load_catalogs(){
 
 load_catalogs || exit 1
 
-# Embedded TUI interface
 TUI_ACTIVE=0
 TUI_STTY=''
 
@@ -401,7 +400,6 @@ run_tui(){
   done
 }
 
-# Embedded FZF interface
 FZF_RESULT=''
 FZF_FAMILY_LINES=()
 FZF_DEVICE_LINES=()
@@ -1232,8 +1230,6 @@ validate_arch(){
 }
 
 arch_runtime_ldflags(){
-  # Legacy Forever 7878 SH4 uses src/legacy_sh4 atomics and must not
-  # depend on libatomic from the old GCC 4.x runtime.
   if [[ "$ARCH" == "sh4" && "$TOOLCHAIN" == "sh4" ]]; then
     printf '%s' ''
     return 0
@@ -1473,7 +1469,6 @@ build_device(){
   [[ -n "$PCSC_LIBS" ]] && args+=("PCSC_LIBS=$PCSC_LIBS")
   local cflags="$TC_CFLAGS $CFLAGS_EXTRA" ldflags="$TC_LDFLAGS $LDFLAGS_EXTRA"
   if [[ "$ARCH" == "sh4" && "$TOOLCHAIN" == "sh4" ]]; then
-    # Legacy SH4 compatibility layer supplies atomics in the source tree.
     ldflags="$(sed -E 's/(^|[[:space:]])-Wl,-Bstatic[[:space:]]+-latomic[[:space:]]+-Wl,-Bdynamic([[:space:]]|$)/ /g; s/(^|[[:space:]])-latomic([[:space:]]|$)/ /g; s/[[:space:]]+/ /g; s/^ | $//g' <<< "$ldflags")"
   else
     case " $ldflags " in

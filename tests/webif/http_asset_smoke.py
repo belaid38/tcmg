@@ -52,7 +52,6 @@ for ref in sorted(refs):
         ok(f'asset {ref} non-empty', bool(body), len(body))
         ok(f'asset {ref} valid UTF-8', is_utf8(body))
 
-# The readers bundle is a regression target because its embedded byte array has no NUL terminator.
 ref = '/assets/readers.js'
 if ref in refs:
     body = s.get(BASE + ref, timeout=10).content

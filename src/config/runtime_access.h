@@ -26,6 +26,20 @@ typedef struct {
 } S_CONFIG_NETWORK_VIEW;
 
 bool cfg_runtime_network_snapshot(S_CONFIG_NETWORK_VIEW *out);
+
+typedef struct {
+    bool    enabled;
+    char    user[CFGKEY_LEN];
+    char    socket[CFGPATH_LEN];
+    char    boxtype[16];
+    int32_t delay_ms;
+    int32_t max_services;
+    int32_t pmt_mode;
+    int32_t listen_port;
+    char    serverip[MAXIPLEN];
+} S_CONFIG_DVBAPI_VIEW;
+
+bool cfg_runtime_dvbapi_snapshot(S_CONFIG_DVBAPI_VIEW *out);
 int cfg_runtime_reader_snapshot(S_READER *out, size_t cap);
 int cfg_runtime_reader_snapshot_indexed(S_READER *out, size_t cap);
 bool cfg_runtime_reader_get(int index, S_READER *out);

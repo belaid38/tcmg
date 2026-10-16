@@ -430,19 +430,47 @@ static void *http_server_thread(void *arg)
 			}
 			pthread_t t;
 			pthread_attr_t a;
+			const pthread_attr_t *attrp = NULL;
+			int attr_ready = 0;
+			int detached_attr = 0;
 			ca2->fd = cfd;
 			tcmg_strlcpy(ca2->ip, client_ip, MAXIPLEN);
 			pthread_mutex_lock(&s_webif_workers_mtx);
 			s_webif_workers++;
 			pthread_mutex_unlock(&s_webif_workers_mtx);
-			pthread_attr_init(&a);
-			pthread_attr_setdetachstate(&a, PTHREAD_CREATE_DETACHED);
-			pthread_attr_setstacksize(&a, 128 * 1024);
-			if (pthread_create(&t, &a, conn_thread, ca2) == 0) {
-				pthread_attr_destroy(&a);
+			int arc = pthread_attr_init(&a);
+			if (arc == 0) {
+				attr_ready = 1;
+				arc = pthread_attr_setdetachstate(&a, PTHREAD_CREATE_DETACHED);
+				if (arc == 0) {
+					attrp = &a;
+					detached_attr = 1;
+					int src = pthread_attr_setstacksize(&a, 128 * 1024);
+					if (src != 0)
+						tcmg_log_dbg(D_HTTP, "HTTP worker stack size request failed rc=%d (%s); using default stack", src, strerror(src));
+				} else {
+					tcmg_log("HTTP worker detach attribute failed rc=%d (%s); using per-thread detach", arc, strerror(arc));
+					pthread_attr_destroy(&a);
+					attr_ready = 0;
+				}
+			} else {
+				tcmg_log("HTTP worker attribute initialization failed rc=%d (%s); using per-thread detach", arc, strerror(arc));
+			}
+			int prc = pthread_create(&t, attrp, conn_thread, ca2);
+			if (prc == 0) {
+				if (!detached_attr) {
+					int drc = pthread_detach(t);
+					if (drc != 0) {
+						tcmg_log("HTTP worker detach failed rc=%d (%s); joining worker", drc, strerror(drc));
+						int jrc = pthread_join(t, NULL);
+						if (jrc != 0) tcmg_log("HTTP worker fallback join failed rc=%d (%s)", jrc, strerror(jrc));
+					}
+				}
+				if (attr_ready) pthread_attr_destroy(&a);
 				continue;
 			}
-			pthread_attr_destroy(&a);
+			tcmg_log("HTTP worker pthread_create failed rc=%d (%s)", prc, strerror(prc));
+			if (attr_ready) pthread_attr_destroy(&a);
 			pthread_mutex_lock(&s_webif_workers_mtx);
 			if (s_webif_workers > 0) s_webif_workers--;
 			if (s_webif_workers == 0) pthread_cond_broadcast(&s_webif_workers_cv);
@@ -536,22 +564,32 @@ int32_t webif_start(void)
 #endif
 	atomic_store_explicit(&s_webif_running, 1, memory_order_release);
 	pthread_attr_t attr;
-	pthread_attr_init(&attr);
-	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
-	pthread_attr_setstacksize(&attr, 256 * 1024);
-	if (pthread_create(&s_webif_tid, &attr, http_server_thread, NULL) != 0) {
-		tcmg_log("pthread_create failed: errno=%d (%s)", errno, strerror(errno));
+	const pthread_attr_t *attrp = NULL;
+	int attr_ready = 0;
+	int arc = pthread_attr_init(&attr);
+	if (arc == 0) {
+		attr_ready = 1;
+		attrp = &attr; /* joinable is the pthread default; webif_stop joins it */
+		int src = pthread_attr_setstacksize(&attr, 256 * 1024);
+		if (src != 0)
+			tcmg_log_dbg(D_HTTP, "HTTP server stack size request failed rc=%d (%s); using default stack", src, strerror(src));
+	} else {
+		tcmg_log("HTTP server attribute initialization failed rc=%d (%s); using default attributes", arc, strerror(arc));
+	}
+	int trc = pthread_create(&s_webif_tid, attrp, http_server_thread, NULL);
+	if (trc != 0) {
+		tcmg_log("HTTP server pthread_create failed rc=%d (%s)", trc, strerror(trc));
 		atomic_store_explicit(&s_webif_running, 0, memory_order_release);
 		sem_destroy(&s_webif_sem);
 #ifndef TCMG_OS_WINDOWS
 		webif_wake_close();
 #endif
 		close(s_webif_sock); s_webif_sock = -1;
-		pthread_attr_destroy(&attr);
+		if (attr_ready) pthread_attr_destroy(&attr);
 		pthread_mutex_unlock(&s_webif_lifecycle_mtx);
 		return -1;
 	}
-	pthread_attr_destroy(&attr);
+	if (attr_ready) pthread_attr_destroy(&attr);
 	pthread_mutex_unlock(&s_webif_lifecycle_mtx);
 	return 0;
 }

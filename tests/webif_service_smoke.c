@@ -113,6 +113,51 @@ int main(void)
         webif_auth_basic_valid("prefix Basic YWRtaW46c2VjcmV0") ||
         webif_auth_basic_valid("Basic YWRtaW46c2VjcmV0 garbage")) return 12;
     {
+        /* Empty credentials must never disable authentication on a public bind. */
+        pthread_rwlock_wrlock(&g_cfg.acc_lock);
+        g_cfg.webif_user[0] = '\0';
+        g_cfg.webif_pass[0] = '\0';
+        snprintf(g_cfg.webif_bindaddr, sizeof(g_cfg.webif_bindaddr), "0.0.0.0");
+        pthread_rwlock_unlock(&g_cfg.acc_lock);
+        if (!webif_auth_enabled() || webif_credentials_valid("", "") ||
+            webif_auth_basic_valid("Basic Og==")) return 28;
+        pthread_rwlock_wrlock(&g_cfg.acc_lock);
+        snprintf(g_cfg.webif_user, sizeof(g_cfg.webif_user), "admin");
+        snprintf(g_cfg.webif_pass, sizeof(g_cfg.webif_pass), "secret");
+        snprintf(g_cfg.webif_bindaddr, sizeof(g_cfg.webif_bindaddr), "127.0.0.1");
+        pthread_rwlock_unlock(&g_cfg.acc_lock);
+    }
+    {
+        /* Unauthenticated loopback mode is not a credential wildcard. */
+        pthread_rwlock_wrlock(&g_cfg.acc_lock);
+        g_cfg.webif_user[0] = '\0';
+        g_cfg.webif_pass[0] = '\0';
+        snprintf(g_cfg.webif_bindaddr, sizeof(g_cfg.webif_bindaddr), "127.0.0.1");
+        pthread_rwlock_unlock(&g_cfg.acc_lock);
+        if (webif_auth_enabled() || !webif_credentials_valid("", "") ||
+            webif_credentials_valid("intruder", "anything") ||
+            webif_auth_basic_valid("Basic Og==")) return 31;
+        pthread_rwlock_wrlock(&g_cfg.acc_lock);
+        snprintf(g_cfg.webif_user, sizeof(g_cfg.webif_user), "admin");
+        snprintf(g_cfg.webif_pass, sizeof(g_cfg.webif_pass), "secret");
+        pthread_rwlock_unlock(&g_cfg.acc_lock);
+    }
+    {
+        S_WEBIF_CONFIG_PATCH patch;
+        bool restart_required = false;
+        memset(&patch, 0, sizeof(patch));
+        patch.has_webif_user = 1;
+        patch.has_webif_pass = 1;
+        patch.has_webif_bindaddr = 1;
+        snprintf(patch.webif_bindaddr, sizeof(patch.webif_bindaddr), "0.0.0.0");
+        /* Moving to a public bind and clearing both credentials must fail
+         * atomically, leaving the live configuration unchanged. */
+        if (webif_config_apply(&patch, &restart_required)) return 29;
+        if (!webif_config_snapshot(&cfg) || strcmp(cfg.webif_user, "admin") != 0 ||
+            strcmp(cfg.webif_pass, "secret") != 0 || strcmp(cfg.webif_bindaddr, "127.0.0.1") != 0)
+            return 30;
+    }
+    {
         char cookie[WEB_SESSION_LEN + 1] = "";
         char cookie_buf[WEB_SESSION_LEN + 1] = "";
         session_create(cookie);

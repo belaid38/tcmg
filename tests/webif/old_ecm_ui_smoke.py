@@ -29,7 +29,6 @@ with sync_playwright() as p:
         assert page.locator('#rMaintMode').input_value() == 'fast_reset', proto
         page.locator('#rMaintMode').select_option('old_ecm')
         assert not page.locator('#rOldSourceWrap').is_hidden(), proto
-        # the interval trigger was removed: no trigger select, no interval field, only the success count
         assert page.locator('#rOldTrigger').count() == 0, proto
         assert page.locator('#rOldInterval').count() == 0, proto
         assert not page.locator('#rOldSuccessesWrap').is_hidden(), proto

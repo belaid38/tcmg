@@ -118,6 +118,8 @@ bool cfg_reload(const char *file, char *err, size_t esz)
     tcmg_strlcpy(g_cfg.cccam_bindaddr, next.cccam_bindaddr, sizeof(g_cfg.cccam_bindaddr));
     g_cfg.cs378x_port = next.cs378x_port;
     tcmg_strlcpy(g_cfg.cs378x_bindaddr, next.cs378x_bindaddr, sizeof(g_cfg.cs378x_bindaddr));
+    g_cfg.camd35_port = next.camd35_port;
+    tcmg_strlcpy(g_cfg.camd35_bindaddr, next.camd35_bindaddr, sizeof(g_cfg.camd35_bindaddr));
     g_cfg.newcamd_port = next.newcamd_port;
     tcmg_strlcpy(g_cfg.newcamd_bindaddr, next.newcamd_bindaddr, sizeof(g_cfg.newcamd_bindaddr));
     memcpy(g_cfg.newcamd_key, next.newcamd_key, sizeof(g_cfg.newcamd_key));
@@ -200,9 +202,12 @@ void cfg_print(const S_CONFIG *c)
              c->config_file, c->user_file, c->server_file);
     tcmg_log("readers=%d accounts=%d disabled=%d",
              c->nreaders, c->naccounts, disabled);
-    tcmg_log("network: newcamd=%d cccam=%d cs378x=%d webif=%d",
-             c->newcamd_port, c->cccam_port, c->cs378x_port,
+    tcmg_log("network: newcamd=%d cccam=%d cs378x=%d camd35-udp=%d webif=%d",
+             c->newcamd_port, c->cccam_port, c->cs378x_port, c->camd35_port,
              c->webif_enabled ? c->webif_port : 0);
+    if (c->dvbapi_enabled)
+        tcmg_log("dvbapi: enabled socket=%s user=%s boxtype=%s",
+                 c->dvbapi_socket, c->dvbapi_user, c->dvbapi_boxtype);
 }
 
 const char *cfg_client_name(uint16_t id)

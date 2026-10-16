@@ -33,7 +33,7 @@ typedef struct sci_parameters {
     uint32_t CWT;
     uint32_t BWT;
     uint32_t EGT;
-    uint32_t clock_stop_polarity;
+    unsigned char clock_stop_polarity;
     unsigned char check;
     unsigned char P;
     unsigned char I;

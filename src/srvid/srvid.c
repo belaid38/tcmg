@@ -62,125 +62,189 @@ static void tbl_insert(S_SRVID_TABLE *t, uint32_t key, uint32_t name_off)
 
 static uint32_t pool_add(S_SRVID_TABLE *t, const char *name)
 {
-	size_t n = strnlen(name, SRVID_NAME_MAX - 1);
-	if (t->pool_len + n + 1 > t->pool_cap)
-	{
-		size_t ncap = t->pool_cap ? t->pool_cap * 2 : 4096;
-		while (ncap < t->pool_len + n + 1) ncap *= 2;
-		char *np = (char *)realloc(t->pool, ncap);
-		if (!np) return UINT32_MAX;
-		t->pool = np;
-		t->pool_cap = ncap;
-	}
-	uint32_t off = (uint32_t)t->pool_len;
-	memcpy(t->pool + off, name, n);
-	t->pool[off + n] = '\0';
-	t->pool_len += n + 1;
-	return off;
+    size_t n;
+    size_t required;
+    size_t ncap;
+    char *np;
+
+    if (!t || !name) return UINT32_MAX;
+    n = strnlen(name, SRVID_NAME_MAX - 1);
+    if (t->pool_len > UINT32_MAX || n + 1 > (size_t)UINT32_MAX - t->pool_len)
+        return UINT32_MAX;
+    required = t->pool_len + n + 1;
+
+    if (required > t->pool_cap) {
+        ncap = t->pool_cap ? t->pool_cap : 4096;
+        while (ncap < required) {
+            if (ncap > (size_t)UINT32_MAX / 2) {
+                ncap = required;
+                break;
+            }
+            ncap *= 2;
+        }
+        np = (char *)realloc(t->pool, ncap);
+        if (!np) return UINT32_MAX;
+        t->pool = np;
+        t->pool_cap = ncap;
+    }
+
+    uint32_t off = (uint32_t)t->pool_len;
+    memcpy(t->pool + off, name, n);
+    t->pool[off + n] = '\0';
+    t->pool_len += n + 1;
+    return off;
 }
 
 static void trim(char *s)
 {
-	char *p = s;
-	while (isspace((unsigned char)*p)) p++;
-	if (p != s) memmove(s, p, strlen(p) + 1);
-	char *q = s + strlen(s) - 1;
-	while (q >= s && isspace((unsigned char)*q)) *q-- = '\0';
+    char *p;
+    char *q;
+    if (!s) return;
+    p = s;
+    while (*p && isspace((unsigned char)*p)) p++;
+    if (p != s) memmove(s, p, strlen(p) + 1);
+    if (!*s) return;
+
+    q = s + strlen(s) - 1;
+    while (q > s && isspace((unsigned char)*q)) *q-- = '\0';
+    if (q == s && isspace((unsigned char)*q)) *q = '\0';
+}
+
+/* A truncated fgets() buffer must not be treated as a separate physical line:
+ * the remaining bytes may begin with something that looks like a valid entry. */
+static bool skip_overlong_line(FILE *f, const char *line)
+{
+    int ch;
+    if (strchr(line, '\n')) return false;
+    ch = fgetc(f);
+    if (ch == EOF) return false;
+    while (ch != EOF && ch != '\n') ch = fgetc(f);
+    return true;
+}
+
+static bool parse_hex_u16_strict(const char *s, uint16_t *out)
+{
+    size_t n;
+    char *end = NULL;
+    unsigned long v;
+    if (!s || !out) return false;
+    n = strlen(s);
+    if (n == 0 || n > 4) return false;
+    for (size_t i = 0; i < n; i++)
+        if (!isxdigit((unsigned char)s[i])) return false;
+    errno = 0;
+    v = strtoul(s, &end, 16);
+    if (errno != 0 || end == s || !end || *end || v == 0 || v > UINT16_MAX)
+        return false;
+    *out = (uint16_t)v;
+    return true;
 }
 
 int srvid_load(const char *path)
 {
-	FILE *f = fopen(path, "r");
-	if (!f) return -1;
+    FILE *f;
+    char line[512];
+    size_t pairs = 0;
+    uint32_t nb = SRVID_MIN_BUCKETS;
+    S_SRVID_TABLE *newtbl;
 
-	char line[512];
+    if (!path || !path[0]) return -1;
+    f = fopen(path, "r");
+    if (!f) return -1;
 
-	size_t pairs = 0;
-	while (fgets(line, sizeof(line), f))
-	{
-		char *colon = strchr(line, ':');
-		char *pipe  = strchr(line, '|');
-		if (!colon || !pipe || colon > pipe) continue;
-		pairs++;
-		for (char *c = colon; c < pipe; c++)
-			if (*c == ',') pairs++;
-	}
-	rewind(f);
+    while (fgets(line, sizeof(line), f)) {
+        if (skip_overlong_line(f, line)) continue;
+        char *colon = strchr(line, ':');
+        char *pipe = strchr(line, '|');
+        if (!colon || !pipe || colon > pipe) continue;
+        if (pairs < SIZE_MAX) pairs++;
+        for (char *c = colon; c < pipe; c++)
+            if (*c == ',' && pairs < SIZE_MAX) pairs++;
+    }
+    if (ferror(f)) { fclose(f); return -1; }
+    rewind(f);
 
-	uint32_t nb = SRVID_MIN_BUCKETS;
-	while ((size_t)nb < pairs * 2 && nb < (1u << 24)) nb <<= 1;
+    size_t target = pairs > SIZE_MAX / 2 ? SIZE_MAX : pairs * 2;
+    while ((size_t)nb < target && nb < (1u << 24)) nb <<= 1;
 
-	S_SRVID_TABLE *newtbl = (S_SRVID_TABLE *)calloc(1, sizeof(S_SRVID_TABLE));
-	if (!newtbl) { fclose(f); return -1; }
-	newtbl->tbl = (S_SRVID_ENTRY *)calloc(nb, sizeof(S_SRVID_ENTRY));
-	if (!newtbl->tbl) { tbl_free(newtbl); fclose(f); return -1; }
-	newtbl->mask = nb - 1;
+    newtbl = (S_SRVID_TABLE *)calloc(1, sizeof(S_SRVID_TABLE));
+    if (!newtbl) { fclose(f); return -1; }
+    newtbl->tbl = (S_SRVID_ENTRY *)calloc(nb, sizeof(S_SRVID_ENTRY));
+    if (!newtbl->tbl) { tbl_free(newtbl); fclose(f); return -1; }
+    newtbl->mask = nb - 1;
 
-	while (fgets(line, sizeof(line), f))
-	{
-		trim(line);
-		if (!line[0] || line[0] == '#') continue;
+    while (fgets(line, sizeof(line), f)) {
+        if (skip_overlong_line(f, line)) continue;
+        trim(line);
+        if (!line[0] || line[0] == '#') continue;
 
-		char *pipe = strchr(line, '|');
-		if (!pipe) continue;
-		*pipe++ = '\0';
+        char *pipe = strchr(line, '|');
+        if (!pipe) continue;
+        *pipe++ = '\0';
+        char *name_end = strchr(pipe, '|');
+        if (name_end) *name_end = '\0';
+        trim(pipe);
+        if (!*pipe) continue;
 
-		char *name_end = strchr(pipe, '|');
-		if (name_end) *name_end = '\0';
-		trim(pipe);
-		if (!*pipe) continue;
+        char *colon = strchr(line, ':');
+        if (!colon) continue;
+        *colon++ = '\0';
+        trim(line);
 
-		char *colon = strchr(line, ':');
-		if (!colon) continue;
-		*colon++ = '\0';
+        uint16_t sid;
+        if (!parse_hex_u16_strict(line, &sid)) continue;
 
-		trim(line);
-		unsigned sid_u = 0;
-		if (sscanf(line, "%X", &sid_u) != 1 || !sid_u) continue;
-		uint16_t sid = (uint16_t)sid_u;
+        uint16_t caids[MAX_CAIDS_PER_LINE];
+        int ncaid = 0;
+        char *saveptr = NULL;
+        char *tok = strtok_r(colon, ",", &saveptr);
+        bool valid = true;
+        while (tok) {
+            uint16_t caid;
+            trim(tok);
+            if (ncaid >= MAX_CAIDS_PER_LINE || !parse_hex_u16_strict(tok, &caid)) {
+                valid = false;
+                break;
+            }
+            bool duplicate = false;
+            for (int i = 0; i < ncaid; i++)
+                if (caids[i] == caid) { duplicate = true; break; }
+            if (!duplicate) caids[ncaid++] = caid;
+            tok = strtok_r(NULL, ",", &saveptr);
+        }
+        if (!valid || ncaid == 0) continue;
 
-		uint32_t name_off = UINT32_MAX;
-		char *saveptr = NULL;
-		char *tok = strtok_r(colon, ",", &saveptr);
-		int ncaid = 0;
+        uint32_t name_off = pool_add(newtbl, pipe);
+        if (name_off == UINT32_MAX) {
+            tbl_free(newtbl);
+            fclose(f);
+            return -1;
+        }
+        for (int i = 0; i < ncaid; i++) {
+            uint32_t key = ((uint32_t)caids[i] << 16) | sid;
+            tbl_insert(newtbl, key, name_off);
+        }
+        newtbl->count++;
+    }
+    if (ferror(f)) {
+        tbl_free(newtbl);
+        fclose(f);
+        return -1;
+    }
+    fclose(f);
 
-		while (tok)
-		{
-			trim(tok);
-			unsigned caid_u = 0;
-			if (sscanf(tok, "%X", &caid_u) == 1 && caid_u)
-			{
-				if (name_off == UINT32_MAX)
-				{
-					name_off = pool_add(newtbl, pipe);
-					if (name_off == UINT32_MAX) break;
-				}
-				uint32_t key = ((uint32_t)(uint16_t)caid_u << 16) | sid;
-				tbl_insert(newtbl, key, name_off);
-				ncaid++;
-			}
-			tok = strtok_r(NULL, ",", &saveptr);
-		}
+    if (newtbl->pool && newtbl->pool_len < newtbl->pool_cap) {
+        char *tp = (char *)realloc(newtbl->pool, newtbl->pool_len);
+        if (tp) { newtbl->pool = tp; newtbl->pool_cap = newtbl->pool_len; }
+    }
 
-		if (ncaid) newtbl->count++;
-	}
-	fclose(f);
-
-	if (newtbl->pool && newtbl->pool_len < newtbl->pool_cap)
-	{
-		char *tp = (char *)realloc(newtbl->pool, newtbl->pool_len);
-		if (tp) { newtbl->pool = tp; newtbl->pool_cap = newtbl->pool_len; }
-	}
-
-	const int count = newtbl->count;
-
-	pthread_mutex_lock(&g_srvid_mtx);
-	S_SRVID_TABLE *old = g_srvid;
-	g_srvid = newtbl;
-	pthread_mutex_unlock(&g_srvid_mtx);
-
-	tbl_free(old);
-	return count;
+    const int count = newtbl->count;
+    pthread_mutex_lock(&g_srvid_mtx);
+    S_SRVID_TABLE *old = g_srvid;
+    g_srvid = newtbl;
+    pthread_mutex_unlock(&g_srvid_mtx);
+    tbl_free(old);
+    return count;
 }
 
 void srvid_lookup_copy(uint16_t caid, uint16_t sid, char *buf, size_t bufsz)

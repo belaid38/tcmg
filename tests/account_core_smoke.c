@@ -127,21 +127,34 @@ int main(void)
 
     first.auth.account = &account;
     account.caid = 0x0B00;
-    assert(ecm_access(&first, 0x0B00, 0x1234, 0, false, true, true) == ECM_ACCESS_OK);
-    assert(ecm_access(&first, 0x0500, 0x1234, 0, false, true, true) == ECM_ACCESS_CAID_DENIED);
+    assert(ecm_access(&first, 0x0B00, 0x1234, 0) == ECM_ACCESS_OK);
+    assert(ecm_access(&first, 0x0500, 0x1234, 0) == ECM_ACCESS_CAID_DENIED);
     account.caid = 0;
-    assert(ecm_access(&first, 0x0500, 0x1234, 0, false, true, true) == ECM_ACCESS_OK);
+    assert(ecm_access(&first, 0x0500, 0x1234, 0) == ECM_ACCESS_OK);
     account.nidents = 1;
     account.idents[0].caid = 0x0B00;
     account.idents[0].provid = 0x000001;
-    assert(ecm_access(&first, 0x0B00, 0x1234, 0x000001, false, true, true) == ECM_ACCESS_OK);
-    assert(ecm_access(&first, 0x0B00, 0x1234, 0x000002, false, true, true) == ECM_ACCESS_IDENT_DENIED);
-    assert(ecm_access(&first, 0x0500, 0x1234, 0x000001, false, true, true) == ECM_ACCESS_IDENT_DENIED);
+    assert(ecm_access(&first, 0x0B00, 0x1234, 0x000001) == ECM_ACCESS_OK);
+    assert(ecm_access(&first, 0x0B00, 0x1234, 0x000002) == ECM_ACCESS_IDENT_DENIED);
+    assert(ecm_access(&first, 0x0500, 0x1234, 0x000001) == ECM_ACCESS_IDENT_DENIED);
     account.nidents = 0;
-    assert(ecm_access(&first, 0x0B00, 0x0001, 0, false, true, true) == ECM_ACCESS_SID_DENIED);
+    assert(ecm_access(&first, 0x0B00, 0x0001, 0) == ECM_ACCESS_SID_DENIED);
+
+    /* The schedule check must be enforced regardless of which protocol calls
+     * ecm_access(). Force the account window to tomorrow only. */
+    time_t now = time(NULL);
+    struct tm local_now;
+    assert(localtime_r(&now, &local_now) != NULL);
+    int current_wday = (local_now.tm_wday == 0) ? 6 : local_now.tm_wday - 1;
+    int tomorrow_wday = (current_wday + 1) % 7;
+    account.sched_day_from = (int8_t)tomorrow_wday;
+    account.sched_day_to = (int8_t)tomorrow_wday;
+    assert(ecm_access(&first, 0x0B00, 0x1234, 0) == ECM_ACCESS_SCHEDULE);
+    account.sched_day_from = -1;
+    account.sched_day_to = -1;
 
     first.auth.account = NULL;
-    assert(ecm_access(&first, 0x0B00, 0x1234, 0, false, true, true) == ECM_ACCESS_NO_ACCOUNT);
+    assert(ecm_access(&first, 0x0B00, 0x1234, 0) == ECM_ACCESS_NO_ACCOUNT);
 
     pthread_rwlock_destroy(&g_cfg.acc_lock);
     puts("account_core_smoke: PASS");

@@ -6,6 +6,7 @@
 #include "../../src/core/constants.h"
 #include "../../src/core/utils.h"
 #include "../../src/reader/protocol.h"
+#include "../../src/reader/rules.h"
 #include "../../src/reader/stats.h"
 #include "../../src/internal/internal.h"
 #include <ctype.h>
@@ -69,6 +70,8 @@ static void copy_reader(const S_READER *r, int idx, S_WEBIF_READER_VIEW *v)
     v->enabled = r->enabled;
     v->inactivitytimeout = r->inactivitytimeout;
     v->ecm_whitelist = r->ecm_whitelist;
+    reader_ecm_whitelist_get_spec(r, v->ecmwhitelist, sizeof(v->ecmwhitelist));
+    v->deprecated = r->deprecated;
     v->fast_reset = r->fast_reset;
     v->fast_reset_idle = r->fast_reset_idle;
     v->poll_ms = r->poll_ms;
@@ -243,13 +246,7 @@ bool webif_reader_save(const S_WEBIF_READER_EDIT *e)
     int iv;
     if (parse_simple_i32(e->enabled, 0, 1, &iv) < 0) return false;
     value.enabled = (int8_t)iv;
-    {
-        if (e->ecmwhitelist[0]) {
-            char *end = NULL; unsigned long x = strtoul(e->ecmwhitelist, &end, 16);
-            if (end == e->ecmwhitelist || *end || x > 0xFF) return false;
-            value.ecm_whitelist = (int32_t)x;
-        } else value.ecm_whitelist = 0;
-    }
+    if (!reader_ecm_whitelist_parse(&value, e->ecmwhitelist)) return false;
     const S_READER_PROTOCOL *protocol = reader_protocol_find(e->protocol);
     if (!protocol) return false;
 
@@ -259,6 +256,11 @@ bool webif_reader_save(const S_WEBIF_READER_EDIT *e)
         value.maintenance_mode = TCMG_READER_MAINT_FAST_RESET; value.old_ecm_source = TCMG_OLD_ECM_SOURCE_AUTO; value.old_ecm_successes = 10; value.old_ecm[0] = 0;
     } else if (protocol->kind == READER_PROTOCOL_CARD) {
         value.user[0] = 0; value.password[0] = 0; value.inactivitytimeout = 30;
+        value.deprecated = 0;
+        if (e->deprecated[0]) {
+            if (parse_simple_i32(e->deprecated, 0, 1, &value.deprecated) < 0) return false;
+            if (strcasecmp(value.protocol, "internal") != 0) value.deprecated = 0;
+        }
         if (parse_simple_i32(e->fast_reset, 0, 86400, &value.fast_reset) < 0) return false;
         if (parse_simple_i32(e->fast_reset_idle, 0, 86400, &value.fast_reset_idle) < 0) return false;
         if (!strcasecmp(e->maintenance_mode, "fast_reset")) value.maintenance_mode = TCMG_READER_MAINT_FAST_RESET;
@@ -272,9 +274,13 @@ bool webif_reader_save(const S_WEBIF_READER_EDIT *e)
         if (old_len > TCMG_OLD_ECM_HEX_LEN || (old_len & 1u)) return false;
         for (size_t z = 0; z < old_len; z++) if (!isxdigit((unsigned char)e->old_ecm[z])) return false;
         if (value.maintenance_mode == TCMG_READER_MAINT_OLD_ECM && value.old_ecm_source == TCMG_OLD_ECM_SOURCE_MANUAL && old_len < 2) return false;
-        if (value.maintenance_mode == TCMG_READER_MAINT_OLD_ECM && value.old_ecm_source == TCMG_OLD_ECM_SOURCE_MANUAL && e->ecmwhitelist[0]) {
-            char *end = NULL; unsigned long wl = strtoul(e->ecmwhitelist, &end, 16);
-            if (end == e->ecmwhitelist || *end || wl > 0xFF || (int)(old_len / 2u) != (int)wl) return false;
+        if (value.maintenance_mode == TCMG_READER_MAINT_OLD_ECM && value.old_ecm_source == TCMG_OLD_ECM_SOURCE_MANUAL && old_len > 0) {
+            uint16_t old_caid = value.ncaids > 0 ? value.caids[0] : (value.nidents > 0 ? value.idents[0].caid : 0);
+            uint32_t old_provid = 0;
+            for (int j = 0; j < value.nidents; j++) {
+                if (value.idents[j].caid == old_caid) { old_provid = value.idents[j].provid; break; }
+            }
+            if (!reader_ecm_whitelist_allows(&value, old_caid, old_provid, (int32_t)(old_len / 2u))) return false;
         }
         tcmg_strlcpy(value.old_ecm, e->old_ecm, sizeof(value.old_ecm));
         if (strcasecmp(value.protocol, "internal") != 0) {

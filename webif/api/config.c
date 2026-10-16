@@ -21,11 +21,15 @@ void send_api_config_get(int fd)
     key_hex[28] = '\0';
     char esc_bindaddr[256], esc_cs_bind[256], esc_logfile[512], esc_user[256], esc_webif_bind[256];
     char esc_failban_allow[CFGVAL_LEN * 2];
-    char esc_sname[CFGVAL_LEN * 2], esc_shost[CFGKEY_LEN * 2];
+    char esc_sname[CFGVAL_LEN * 2], esc_shost[CFGKEY_LEN * 2], esc_dvuser[CFGKEY_LEN * 2], esc_dvsock[CFGPATH_LEN * 2];
+    json_escape(c.dvbapi_user, esc_dvuser, sizeof(esc_dvuser));
+    json_escape(c.dvbapi_socket, esc_dvsock, sizeof(esc_dvsock));
     json_escape(c.seller_name, esc_sname, sizeof(esc_sname));
     json_escape(c.seller_host, esc_shost, sizeof(esc_shost));
     json_escape(c.newcamd_bindaddr, esc_bindaddr, sizeof(esc_bindaddr));
     json_escape(c.cs378x_bindaddr, esc_cs_bind, sizeof(esc_cs_bind));
+    char esc_cm_bind[MAXIPLEN * 6];
+    json_escape(c.camd35_bindaddr, esc_cm_bind, sizeof(esc_cm_bind));
     json_escape(c.logfile, esc_logfile, sizeof(esc_logfile));
     json_escape(c.webif_user, esc_user, sizeof(esc_user));
     json_escape(c.webif_bindaddr, esc_webif_bind, sizeof(esc_webif_bind));
@@ -33,15 +37,16 @@ void send_api_config_get(int fd)
     pos = buf_printf(&buf, &bsz, pos,
         "{\"newcamd_port\":%d,\"newcamd_bindaddr\":\"%s\",\"newcamd_key\":\"%s\","
         "\"newcamd_keepalive\":%d,\"newcamd_mgclient\":%d,\"cccam_port\":%d,\"cs378x_port\":%d,"
-        "\"cs378x_bindaddr\":\"%s\",\"sock_timeout\":%d,\"server_keepalive\":%d,\"server_keepalive_misses\":%d,"
+        "\"cs378x_bindaddr\":\"%s\",\"camd35_port\":%d,\"camd35_bindaddr\":\"%s\",\"sock_timeout\":%d,\"server_keepalive\":%d,\"server_keepalive_misses\":%d,"
         "\"ecm_log\":%d,\"scheduled_restart\":%d,\"scheduled_restart_time\":\"%s\",\"logfile\":\"%s\",\"webif_port\":%d,\"webif_refresh\":%d,\"webif_user\":\"%s\","
         "\"webif_bindaddr\":\"%s\",\"failban_enabled\":%d,\"failban_allowlist\":\"%s\","
-        "\"failban_max_fails\":%d,\"failban_ban_secs\":%d,\"seller_name\":\"%s\",\"seller_type\":\"%s\",\"seller_host\":\"%s\",\"seller_port\":%d}",
+        "\"failban_max_fails\":%d,\"failban_ban_secs\":%d,\"seller_name\":\"%s\",\"seller_type\":\"%s\",\"seller_host\":\"%s\",\"seller_port\":%d,\"dvbapi_enabled\":%d,\"dvbapi_user\":\"%s\",\"dvbapi_socket\":\"%s\",\"dvbapi_boxtype\":\"%s\",\"dvbapi_delay\":%d,\"dvbapi_max_services\":%d}",
         c.newcamd_port, esc_bindaddr, key_hex, (int)c.newcamd_keepalive, (int)c.newcamd_mgclient,
-        c.cccam_port, c.cs378x_port, esc_cs_bind, c.sock_timeout, c.server_keepalive,
+        c.cccam_port, c.cs378x_port, esc_cs_bind, c.camd35_port, esc_cm_bind, c.sock_timeout, c.server_keepalive,
         c.server_keepalive_misses, (int)c.ecm_log, (int)c.scheduled_restart_enabled, c.scheduled_restart_time, esc_logfile, c.webif_port, c.webif_refresh,
         esc_user, esc_webif_bind, (int)c.failban_enabled, esc_failban_allow, c.failban_max_fails, (int)c.failban_ban_secs,
-        esc_sname, c.seller_type, esc_shost, c.seller_port);
+        esc_sname, c.seller_type, esc_shost, c.seller_port,
+        c.dvbapi_enabled, esc_dvuser, esc_dvsock, c.dvbapi_boxtype, c.dvbapi_delay_ms, c.dvbapi_max_services);
     send_response(fd, 200, "OK", "application/json", buf, pos);
     free(buf);
 }
@@ -104,11 +109,12 @@ void handle_api_config_save(int fd, const char *post_body)
 {
 	fparse P = { post_body, "" };
 	char newcamd_port_s[16], newcamd_bindaddr[MAXIPLEN + 8], newcamd_key_s[40], keepalive_s[8], mgclient_s[8];
-	char cccam_port_s[16], cs378x_port_s[16], cs378x_bindaddr[MAXIPLEN+8], sock_timeout_s[16], server_keepalive_s[16], server_keepalive_misses_s[16], ecm_log_s[8], logfile[CFGPATH_LEN];
+	char cccam_port_s[16], cs378x_port_s[16], cs378x_bindaddr[MAXIPLEN+8], camd35_port_s[16], camd35_bindaddr[MAXIPLEN+8], sock_timeout_s[16], server_keepalive_s[16], server_keepalive_misses_s[16], ecm_log_s[8], logfile[CFGPATH_LEN];
 	char webif_port_s[16], webif_refresh_s[16], scheduled_restart_s[8], scheduled_restart_time_s[16], webif_user[CFGKEY_LEN], webif_pass[CFGKEY_LEN];
 	char webif_bindaddr[MAXIPLEN + 8];
 	char failban_enabled_s[8], failban_allowlist_s[CFGVAL_LEN], failban_maxfails_s[16], failban_bansecs_s[16];
 	char seller_name[CFGVAL_LEN], seller_type[16], seller_host[CFGKEY_LEN], seller_port_s[16];
+	char dv_enabled_s[8], dv_user[CFGKEY_LEN], dv_socket[CFGPATH_LEN], dv_boxtype[16], dv_delay_s[16], dv_max_s[16];
 
 	fld(&P, "newcamd_port",      newcamd_port_s,   sizeof(newcamd_port_s));
 	fld(&P, "newcamd_bindaddr",  newcamd_bindaddr, sizeof(newcamd_bindaddr));
@@ -118,6 +124,8 @@ void handle_api_config_save(int fd, const char *post_body)
 	fld(&P, "cccam_port",        cccam_port_s,     sizeof(cccam_port_s));
 	fld(&P, "cs378x_port",       cs378x_port_s,    sizeof(cs378x_port_s));
 	fld(&P, "cs378x_bindaddr",   cs378x_bindaddr,   sizeof(cs378x_bindaddr));
+	fld(&P, "camd35_port",       camd35_port_s,    sizeof(camd35_port_s));
+	fld(&P, "camd35_bindaddr",   camd35_bindaddr,  sizeof(camd35_bindaddr));
 	fld(&P, "sock_timeout",      sock_timeout_s,   sizeof(sock_timeout_s));
 	fld(&P, "server_keepalive", server_keepalive_s, sizeof(server_keepalive_s));
 	fld(&P, "server_keepalive_misses", server_keepalive_misses_s, sizeof(server_keepalive_misses_s));
@@ -138,9 +146,15 @@ void handle_api_config_save(int fd, const char *post_body)
 	fld(&P, "seller_type", seller_type, sizeof(seller_type));
 	fld(&P, "seller_host", seller_host, sizeof(seller_host));
 	fld(&P, "seller_port", seller_port_s, sizeof(seller_port_s));
+	fld(&P, "dvbapi_enabled", dv_enabled_s, sizeof(dv_enabled_s));
+	fld(&P, "dvbapi_user", dv_user, sizeof(dv_user));
+	fld(&P, "dvbapi_socket", dv_socket, sizeof(dv_socket));
+	fld(&P, "dvbapi_boxtype", dv_boxtype, sizeof(dv_boxtype));
+	fld(&P, "dvbapi_delay", dv_delay_s, sizeof(dv_delay_s));
+	fld(&P, "dvbapi_max_services", dv_max_s, sizeof(dv_max_s));
 
-	long v_newcamd_port = 0, v_ka = 0, v_mgc = 0, v_cccam = 0, v_cs378x = 0, v_sock = 0, v_ska = 0, v_skam = 0, v_ecmlog = 0, v_sched = 0, v_wport = 0, v_wref = 0;
-		long v_fb_enabled = 0, v_fbmax = 0, v_fbsecs = 0, v_sport = 0;
+	long v_newcamd_port = 0, v_ka = 0, v_mgc = 0, v_cccam = 0, v_cs378x = 0, v_camd35 = 0, v_sock = 0, v_ska = 0, v_skam = 0, v_ecmlog = 0, v_sched = 0, v_wport = 0, v_wref = 0;
+		long v_fb_enabled = 0, v_fbmax = 0, v_fbsecs = 0, v_sport = 0, v_dve = 0, v_dvd = 0, v_dvm = 0;
 	uint8_t k_new[14];
 
 	int h_np  = num(&P, "newcamd_port",      newcamd_port_s,   0, 65535, &v_newcamd_port);
@@ -149,6 +163,8 @@ void handle_api_config_save(int fd, const char *post_body)
 	int h_cc  = num(&P, "cccam_port",        cccam_port_s,     0, 65535, &v_cccam);
 	int h_cs  = num(&P, "cs378x_port",       cs378x_port_s,    0, 65535, &v_cs378x);
 	ip_ok(&P, "cs378x_bindaddr", cs378x_bindaddr);
+	int h_cm  = num(&P, "camd35_port",      camd35_port_s,     0, 65535, &v_camd35);
+	ip_ok(&P, "camd35_bindaddr", camd35_bindaddr);
 	int h_st  = num(&P, "sock_timeout",      sock_timeout_s,   5, 600, &v_sock);
 	int h_ska = num(&P, "server_keepalive", server_keepalive_s, 0, 3600, &v_ska);
 	int h_skam = num(&P, "server_keepalive_misses", server_keepalive_misses_s, 1, 20, &v_skam);
@@ -160,6 +176,9 @@ void handle_api_config_save(int fd, const char *post_body)
 	int h_fbm = num(&P, "failban_max_fails", failban_maxfails_s, 1, 1000, &v_fbmax);
 	int h_fbs = num(&P, "failban_ban_secs",  failban_bansecs_s,  10, 604800, &v_fbsecs);
 	int h_sp  = num(&P, "seller_port", seller_port_s, 0, 65535, &v_sport);
+	int h_dve = num(&P, "dvbapi_enabled", dv_enabled_s, 0, 1, &v_dve);
+	int h_dvd = num(&P, "dvbapi_delay", dv_delay_s, 0, 60000, &v_dvd);
+	int h_dvm = num(&P, "dvbapi_max_services", dv_max_s, 1, 32, &v_dvm);
 	int h_k1  = hexkey(&P, "newcamd_key", newcamd_key_s, k_new);
 	ip_ok(&P, "newcamd_bindaddr", newcamd_bindaddr);
 	ip_ok(&P, "webif_bindaddr",   webif_bindaddr);
@@ -169,8 +188,16 @@ void handle_api_config_save(int fd, const char *post_body)
 	text_ok(&P, "failban_allowlist", failban_allowlist_s);
 	text_ok(&P, "seller_name", seller_name);
 	text_ok(&P, "seller_host", seller_host);
-	if (seller_type[0] && strcmp(seller_type, "cccam") && strcmp(seller_type, "newcamd") && strcmp(seller_type, "cs378x"))
-		bad(&P, "seller_type", "expected cccam, newcamd or cs378x");
+	text_ok(&P, "dvbapi_user", dv_user);
+	text_ok(&P, "dvbapi_socket", dv_socket);
+	if (dv_socket[0] && dv_socket[0] != '/')
+		bad(&P, "dvbapi_socket", "expected an absolute path");
+	if (form_has(post_body, "dvbapi_user") && !dv_user[0])
+		bad(&P, "dvbapi_user", "must not be empty");
+	if (dv_boxtype[0] && strcmp(dv_boxtype, "auto") && strcmp(dv_boxtype, "dreambox") && strcmp(dv_boxtype, "duckbox") && strcmp(dv_boxtype, "ufs910"))
+		bad(&P, "dvbapi_boxtype", "expected auto, dreambox, duckbox or ufs910");
+	if (seller_type[0] && strcmp(seller_type, "cccam") && strcmp(seller_type, "newcamd") && strcmp(seller_type, "cs378x") && strcmp(seller_type, "camd35"))
+		bad(&P, "seller_type", "expected cccam, newcamd, cs378x or camd35");
 	if (scheduled_restart_time_s[0]) {
 		int hh = -1, mm = -1;
 		if (sscanf(scheduled_restart_time_s, "%d:%d", &hh, &mm) != 2 || hh < 0 || hh > 23 || mm < 0 || mm > 59 || strlen(scheduled_restart_time_s) != 5 || scheduled_restart_time_s[2] != ':')
@@ -194,6 +221,9 @@ void handle_api_config_save(int fd, const char *post_body)
 	patch.has_cs378x_port = h_cs; patch.cs378x_port = (int)v_cs378x;
 	patch.has_cs378x_bindaddr = cs378x_bindaddr[0] || form_has(post_body, "cs378x_bindaddr");
 	tcmg_strlcpy(patch.cs378x_bindaddr, cs378x_bindaddr, sizeof(patch.cs378x_bindaddr));
+	patch.has_camd35_port = h_cm; patch.camd35_port = (int)v_camd35;
+	patch.has_camd35_bindaddr = camd35_bindaddr[0] || form_has(post_body, "camd35_bindaddr");
+	tcmg_strlcpy(patch.camd35_bindaddr, camd35_bindaddr, sizeof(patch.camd35_bindaddr));
 	patch.has_sock_timeout = h_st; patch.sock_timeout = (int)v_sock;
 	patch.has_server_keepalive = h_ska; patch.server_keepalive = (int)v_ska;
 	patch.has_server_keepalive_misses = h_skam; patch.server_keepalive_misses = (int)v_skam;
@@ -224,6 +254,15 @@ void handle_api_config_save(int fd, const char *post_body)
 	tcmg_strlcpy(patch.seller_host, seller_host, sizeof(patch.seller_host));
 	patch.has_seller_port = h_sp || form_has(post_body, "seller_port");
 	patch.seller_port = (int)v_sport;
+	patch.has_dvbapi_enabled = h_dve; patch.dvbapi_enabled = (int)v_dve;
+	patch.has_dvbapi_user = dv_user[0] != '\0';
+	tcmg_strlcpy(patch.dvbapi_user, dv_user, sizeof(patch.dvbapi_user));
+	patch.has_dvbapi_socket = dv_socket[0] != '\0';
+	tcmg_strlcpy(patch.dvbapi_socket, dv_socket, sizeof(patch.dvbapi_socket));
+	patch.has_dvbapi_boxtype = dv_boxtype[0] != '\0';
+	tcmg_strlcpy(patch.dvbapi_boxtype, dv_boxtype, sizeof(patch.dvbapi_boxtype));
+	patch.has_dvbapi_delay = h_dvd; patch.dvbapi_delay_ms = (int)v_dvd;
+	patch.has_dvbapi_max_services = h_dvm; patch.dvbapi_max_services = (int)v_dvm;
 
 	bool restart_required = false;
 	if (!webif_config_apply(&patch, &restart_required)) {

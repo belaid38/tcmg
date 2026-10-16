@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include "core/constants.h"
 
-#define CCCAM_MSG_MAX       1024
+#define CCCAM_MSG_MAX       (TCMG_MAX_ECM_SIZE + 64)
 #define CCCAM_SEED_LEN      16
 #define CCCAM_HASH_LEN      20
 

@@ -77,6 +77,8 @@ typedef struct {
     int enabled;
     int inactivitytimeout;
     int ecm_whitelist;
+    char ecmwhitelist[CFGVAL_LEN];
+    int deprecated;
     int fast_reset;
     int fast_reset_idle;
     int poll_ms;
@@ -124,6 +126,7 @@ typedef struct {
     uint32_t thread_id;
     time_t connect_time;
     time_t last_activity;
+    int64_t cw_last_60s;
 } S_WEBIF_CLIENT_VIEW;
 
 typedef struct {
@@ -137,6 +140,8 @@ typedef struct {
     int cccam_port;
     int cs378x_port;
     char cs378x_bindaddr[MAXIPLEN];
+    int camd35_port;
+    char camd35_bindaddr[MAXIPLEN];
     int sock_timeout;
     int server_keepalive;
     int server_keepalive_misses;
@@ -157,6 +162,12 @@ typedef struct {
     char seller_type[16];
     char seller_host[CFGKEY_LEN];
     int seller_port;
+    int dvbapi_enabled;
+    char dvbapi_user[CFGKEY_LEN];
+    char dvbapi_socket[CFGPATH_LEN];
+    char dvbapi_boxtype[16];
+    int dvbapi_delay_ms;
+    int dvbapi_max_services;
 } S_WEBIF_CONFIG_VIEW;
 
 typedef struct {
@@ -176,6 +187,10 @@ typedef struct {
     int cs378x_port;
     int has_cs378x_bindaddr;
     char cs378x_bindaddr[MAXIPLEN];
+    int has_camd35_port;
+    int camd35_port;
+    int has_camd35_bindaddr;
+    char camd35_bindaddr[MAXIPLEN];
     int has_sock_timeout;
     int sock_timeout;
     int has_server_keepalive;
@@ -216,6 +231,18 @@ typedef struct {
     char seller_host[CFGKEY_LEN];
     int has_seller_port;
     int seller_port;
+    int has_dvbapi_enabled;
+    int dvbapi_enabled;
+    int has_dvbapi_user;
+    char dvbapi_user[CFGKEY_LEN];
+    int has_dvbapi_socket;
+    char dvbapi_socket[CFGPATH_LEN];
+    int has_dvbapi_boxtype;
+    char dvbapi_boxtype[16];
+    int has_dvbapi_delay;
+    int dvbapi_delay_ms;
+    int has_dvbapi_max_services;
+    int dvbapi_max_services;
 } S_WEBIF_CONFIG_PATCH;
 
 typedef struct {
@@ -258,10 +285,11 @@ typedef struct {
     char caid[WEBIF_CAID_LIST_LEN];
     char ident[WEBIF_IDENT_LIST_LEN];
     char sid_whitelist[WEBIF_SID_LIST_LEN];
-    char ecmwhitelist[16];
+    char ecmwhitelist[CFGVAL_LEN];
     char group[WEBIF_GROUPS_LEN];
     char ecmkeys[WEBIF_ECMKEYS_LEN];
     char enabled[8];
+    char deprecated[8];
     char fast_reset[16];
     char fast_reset_idle[16];
     char poll_ms[16];

@@ -4,12 +4,6 @@
 #include <stdint.h>
 #include <stddef.h>
 
-/*
- * Compatibility layer for the legacy SimpleBuild4 SH4 compiler.
- * That compiler predates C11 <stdatomic.h>, so TCMG uses GCC __sync
- * primitives for 8/16/32-bit atomics and a small process-wide lock for
- * 64-bit atomics. Memory-order arguments are intentionally ignored.
- */
 
 typedef enum {
     memory_order_relaxed = 0,
@@ -33,7 +27,6 @@ typedef volatile uint32_t atomic_uint32_t;
 typedef volatile int64_t atomic_int64_t;
 typedef volatile uint64_t atomic_uint64_t;
 
-/* C11 `_Atomic type` spelling -> volatile storage plus explicit atomic ops. */
 #ifndef _Atomic
 #define _Atomic volatile
 #endif

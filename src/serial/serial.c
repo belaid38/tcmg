@@ -1020,8 +1020,10 @@ int serial_start(void)
 {
     slots_init();
     if (atomic_exchange(&s_running, 1)) return 0;
-    if (pthread_create(&s_tid, NULL, serial_thread, NULL) != 0) {
+    int trc = pthread_create(&s_tid, NULL, serial_thread, NULL);
+    if (trc != 0) {
         atomic_store(&s_running, 0);
+        tcmg_log("serial worker thread failed rc=%d (%s)", trc, strerror(trc));
         return -1;
     }
     tcmg_log("reader support enabled");
@@ -1115,7 +1117,6 @@ int serial_do_ecm_reader(int index, uint16_t caid,
         serial_mark_unavailable(s);
     }
     if (rc == 0) {
-        int64_t success_now = mono_ms();
         reader_old_ecm_sync(&s->old_ecm, &cfg);
         if (s->ready && s->present)
             reader_old_ecm_bind(&s->old_ecm, &cfg, s->device, s->atr, s->atr_len);

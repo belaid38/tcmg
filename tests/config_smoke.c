@@ -245,8 +245,8 @@ static int run_first_start_defaults(const char *dir)
     if (!init_cfg(&cfg)) return 0;
     if (!cfg_load(cfgpath, &cfg)) { free_cfg(&cfg); return 0; }
     if (cfg.naccounts != 0 || cfg.nreaders != 0) { free_cfg(&cfg); return 0; }
-    if (cfg.webif_enabled != 1 || cfg.webif_port != 8585 || strcmp(cfg.webif_bindaddr, "0.0.0.0") != 0) { free_cfg(&cfg); return 0; }
-    if (cfg.cccam_port != 0 || cfg.newcamd_port != 0 || cfg.cs378x_port != 0) { free_cfg(&cfg); return 0; }
+    if (cfg.webif_enabled != 1 || cfg.webif_port != 8585 || strcmp(cfg.webif_bindaddr, "127.0.0.1") != 0) { free_cfg(&cfg); return 0; }
+    if (cfg.cccam_port != 0 || cfg.newcamd_port != 0 || cfg.cs378x_port != 0 || cfg.camd35_port != 0) { free_cfg(&cfg); return 0; }
     if (cfg.scheduled_restart_enabled != 0 || cfg.scheduled_restart_minutes != 0) { free_cfg(&cfg); return 0; }
     if (memcmp(cfg.newcamd_key, zero_key, sizeof(zero_key)) != 0) { free_cfg(&cfg); return 0; }
     free_cfg(&cfg);
@@ -264,6 +264,7 @@ int main(void)
         "[newcamd]\nport = 18050\nbindaddr =\nkey = 0102030405060708091011121314\nkeepalive = 0\nmode = auto\n"
         "[cccam]\nport = 18060\nbindaddr =\n"
         "[cs378x]\nport = 18070\nbindaddr =\n"
+        "[camd35]\nport = 18060\nbindaddr =\n"
         "[failban]\nenabled = 0\nallowlist =\nmax_fails = 5\nban_secs = 300\n";
     const char *users =
         "[account]\nuser = client\npwd = one\nenabled = 1\ngroup = 1\ncaid = 0B00\nmax_connections = 2\nexpiration = 0\n"
@@ -278,6 +279,22 @@ int main(void)
         "[reader]\nlabel = internal-sci\nprotocol = internal\nenabled = 0\ngroup = 1\ndevice = /dev/sci0\ndo_ecm = 1\nmaintenance_mode = old_ecm\nold_ecm_source = manual\nold_ecm_trigger = interval\nold_ecm_interval = 30\nold_ecm_successes = 7\necmwhitelist = 37\nold_ecm = 817034703264216EB6EFA65A38468DA2AC005F1CC011508CA82E3E4E0F74462096EE21A7F0DD1E57DD46FF3C5133886CB0861005D9E89C\nfast_reset = 1\npoll_ms = 100\n";
     if (!mkdtemp(dir)) { perror("mkdtemp"); return 2; }
     if (!run_first_start_defaults(dir)) { fprintf(stderr, "first-start defaults test failed\n"); return 9; }
+    {
+        S_CONFIG policy_cfg;
+        char policy_err[256] = "";
+        memset(&policy_cfg, 0, sizeof(policy_cfg));
+        policy_cfg.webif_enabled = 1;
+        policy_cfg.webif_port = 8585;
+        snprintf(policy_cfg.webif_bindaddr, sizeof(policy_cfg.webif_bindaddr), "0.0.0.0");
+        if (cfg_validate(&policy_cfg, policy_err, sizeof(policy_err)) || !strstr(policy_err, "requires both username and password")) {
+            fprintf(stderr, "public WebIF without credentials was not rejected\n"); return 10;
+        }
+        snprintf(policy_cfg.webif_bindaddr, sizeof(policy_cfg.webif_bindaddr), "127.0.0.1");
+        policy_err[0] = '\0';
+        if (!cfg_validate(&policy_cfg, policy_err, sizeof(policy_err))) {
+            fprintf(stderr, "loopback-only WebIF without credentials should be permitted: %s\n", policy_err); return 11;
+        }
+    }
     if (!load_case(dir, global, users, readers, NULL)) return 3;
     const char *tolerant_global =
         "[global]\n"

@@ -183,7 +183,7 @@ int32_t newcamd_reader_do_ecm(int index, const S_READER *reader,
                              uint8_t cw[CW_LEN])
 {
     if (!reader || !ecm || !cw || index < 0 || index >= MAX_READERS ||
-        ecm_len <= 0 || ecm_len > 255)
+        ecm_len <= 0 || ecm_len > TCMG_MAX_ECM_SIZE)
         return -1;
     if (!reader->enabled ||
         (strcasecmp(reader->protocol, "mgcamd") != 0 &&

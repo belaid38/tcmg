@@ -129,7 +129,18 @@ static void cc_send_cards(S_CCCAM_CLIENT *cc, const S_ACCOUNT *acc)
     ncaids = account_collect_caids(acc, caids,
                                     (int32_t)(sizeof(caids) / sizeof(caids[0])));
     for (int32_t i = 0; i < ncaids; i++) {
-        cc_send_new_card(cc, card_id++, caids[i], &zero, 1);
+        /* announce the account idents of this CAID: OSCam and CCcam only send an ECM
+         * to a card whose provider list contains the provider of the request */
+        uint32_t provs[32];
+        int nprov = 0;
+        for (int32_t k = 0; k < acc->nidents && nprov < 32; k++) {
+            bool dup = false;
+            if (acc->idents[k].caid != caids[i]) continue;
+            for (int m = 0; m < nprov; m++) if (provs[m] == acc->idents[k].provid) dup = true;
+            if (!dup) provs[nprov++] = acc->idents[k].provid;
+        }
+        if (nprov == 0) cc_send_new_card(cc, card_id++, caids[i], &zero, 1);
+        else cc_send_new_card(cc, card_id++, caids[i], provs, nprov);
         total++;
     }
 
@@ -198,7 +209,8 @@ static void cc_handle_ecm(S_CCCAM_CLIENT *cc, S_CLIENT *cl,
     uint8_t cw[CW_LEN] = {0};
     uint16_t caid, sid;
     uint32_t provid, card_id;
-    uint8_t ecm_len;
+    uint16_t ecm_len;
+    uint8_t declared_ecm_len;
     T_ECM_ACCESS_STATUS access;
     S_ECM_RESULT result;
 
@@ -214,16 +226,29 @@ static void cc_handle_ecm(S_CCCAM_CLIENT *cc, S_CLIENT *cl,
     card_id = ((uint32_t)p[6] << 24) | ((uint32_t)p[7] << 16) |
               ((uint32_t)p[8] << 8) | p[9];
     sid = (uint16_t)(((uint16_t)p[10] << 8) | p[11]);
-    ecm_len = p[12];
-
-    if (ecm_len == 0 || plen < (uint16_t)(13 + ecm_len)) {
-        tcmg_log_dbg(D_CCCAM, "%s ECM bad ecm_len=%u plen=%u",
-                     cl->identity.ip, ecm_len, plen);
+    declared_ecm_len = p[12];
+    /* OSCam derives the ECM byte count from the frame length, not p[12]. */
+    ecm_len = (uint16_t)(plen - 13);
+    if (ecm_len == 0 || ecm_len > TCMG_MAX_ECM_SIZE) {
+        tcmg_log_dbg(D_CCCAM, "%s ECM bad frame_ecm_len=%u declared=%u plen=%u",
+                     cl->identity.ip, ecm_len, declared_ecm_len, plen);
         cc_send_msg(cc, CCCAM_CMD_ECM_NOK1, NULL, 0);
         return;
     }
+    if (declared_ecm_len != (uint8_t)ecm_len) {
+        tcmg_log_dbg(D_CCCAM, "%s ECM length field differs: declared=%u frame=%u; using frame length",
+                     cl->identity.ip, declared_ecm_len, ecm_len);
+    }
 
-    access = ecm_access(cl, caid, sid, provid, false, true, false);
+    int32_t normalized_len = (int32_t)ecm_len;
+    if (!ecm_prepare_input(caid, &provid, p + 13, &normalized_len)) {
+        cc_send_msg(cc, CCCAM_CMD_ECM_NOK1, NULL, 0);
+        secure_zero(cw, sizeof(cw));
+        return;
+    }
+    ecm_len = (uint16_t)normalized_len;
+
+    access = ecm_access(cl, caid, sid, provid);
     if (access != ECM_ACCESS_OK) {
         switch (access) {
         case ECM_ACCESS_CAID_DENIED:
@@ -267,7 +292,6 @@ static void cc_handle_ecm(S_CCCAM_CLIENT *cc, S_CLIENT *cl,
     memcpy(resp, cw, CW_LEN);
     cc_cw_crypt(cc, resp, card_id);
     cc_send_msg(cc, CCCAM_CMD_ECM_REQ, resp, CW_LEN);
-    cccam_crypto_crypt(&cc->send_block, resp, CW_LEN, true);
     tcmg_dump_dbg(D_CCCAM, cc->peer_node_id, 8,
                   "%s cw peer node card_id=%08X node", cl->identity.ip, card_id);
     tcmg_dump_dbg(D_CCCAM, cw, CW_LEN,
@@ -468,16 +492,22 @@ void *handle_cccam_client(void *arg)
         }
         if(rr<0){
             if (cl.identity.user[0]) {
-                S_ACCOUNT_STATS_SNAPSHOT stats;
+                S_ACCOUNT_STATS_SNAPSHOT stats = {0};
                 S_ACCOUNT *sa = account_session_acquire(&cl);
+                bool have_stats = sa != NULL;
                 if (sa) {
                     account_stats_snapshot(sa, &stats);
                     account_release(sa);
                 }
-                tcmg_log("%s disconnected user='%s' ecm_total=%llu cw_found=%lld",
-                         cl.identity.ip, cl.identity.user,
-                         (unsigned long long)stats.ecm_total,
-                         (long long)stats.cw_found);
+                if (have_stats) {
+                    tcmg_log("%s disconnected user='%s' ecm_total=%llu cw_found=%lld",
+                             cl.identity.ip, cl.identity.user,
+                             (unsigned long long)stats.ecm_total,
+                             (long long)stats.cw_found);
+                } else {
+                    tcmg_log("%s disconnected user='%s' account stats unavailable",
+                             cl.identity.ip, cl.identity.user);
+                }
             }
             else
                 tcmg_log_dbg(D_CONN, "%s disconnected (no user)", cl.identity.ip);

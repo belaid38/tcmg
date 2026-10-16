@@ -1,6 +1,7 @@
 #define MODULE_LOG_PREFIX "conf"
 #include "config_internal.h"
 #include "../reader/protocol.h"
+#include "../reader/rules.h"
 S_READER*cfg_reader_new(S_CONFIG*cfg,int index)
 {
     S_READER*r;
@@ -88,14 +89,15 @@ bool cfg_parse_readers(const char*path,S_CONFIG*c,char*err,size_t esz)
         else if(!strcasecmp(key,"caid")){if(!cfg_parse_u16_list(value,reader->caids,&reader->ncaids,MAX_CAIDS_PER_READER)){fprintf(stderr,"WARNING: %s line %d invalid value for 'caid' ignored\n",path,line_no);continue;}}
         else if(!strcasecmp(key,"ident")){if(!cfg_parse_ident_list(value,reader->idents,&reader->nidents,MAX_IDENT_FILTERS)){fprintf(stderr,"WARNING: %s line %d invalid value for 'ident' ignored\n",path,line_no);continue;}}
         else if(!strcasecmp(key,"sid_whitelist")){if(!cfg_parse_u16_list(value,reader->sid_whitelist,&reader->nsid_whitelist,MAX_SID_WHITELIST)){fprintf(stderr,"WARNING: %s line %d invalid value for 'sid_whitelist' ignored\n",path,line_no);continue;}}
-        else if(!strcasecmp(key,"ecmwhitelist")){uint8_t wl;if(!cfg_parse_u8_hex(value,&wl)){fprintf(stderr,"WARNING: %s line %d invalid value for 'ecmwhitelist' ignored\n",path,line_no);continue;}reader->ecm_whitelist=(int32_t)wl;}
+        else if(!strcasecmp(key,"ecmwhitelist")){if(!reader_ecm_whitelist_parse(reader,value)){fprintf(stderr,"WARNING: %s line %d invalid value for 'ecmwhitelist' ignored\n",path,line_no);continue;}}
         else if(!strcasecmp(key,"inactivitytimeout")){if(!cfg_parse_i32_range(value,1,600,&v)){fprintf(stderr,"WARNING: %s line %d invalid value for 'inactivitytimeout' ignored\n",path,line_no);continue;}reader->inactivitytimeout=v;}
         else if(!strcasecmp(key,"do_ecm")){if(!cfg_parse_bool(value,&b)){fprintf(stderr,"WARNING: %s line %d invalid value for 'do_ecm' ignored\n",path,line_no);continue;}}
+        else if(!strcasecmp(key,"deprecated")){if(!cfg_parse_i32_range(value,0,1,&v)){fprintf(stderr,"WARNING: %s line %d invalid value for 'deprecated' ignored\n",path,line_no);continue;}reader->deprecated=v;}
         else if(!strcasecmp(key,"fast_reset")){if(!cfg_parse_i32_range(value,0,86400,&v)){fprintf(stderr,"WARNING: %s line %d invalid value for 'fast_reset' ignored\n",path,line_no);continue;}reader->fast_reset=v;}
         else if(!strcasecmp(key,"fast_reset_idle")){if(!cfg_parse_i32_range(value,0,86400,&v)){fprintf(stderr,"WARNING: %s line %d invalid value for 'fast_reset_idle' ignored\n",path,line_no);continue;}reader->fast_reset_idle=v;}
         else if(!strcasecmp(key,"maintenance_mode")){if(!strcasecmp(value,"fast_reset")) reader->maintenance_mode=TCMG_READER_MAINT_FAST_RESET; else if(!strcasecmp(value,"old_ecm")) reader->maintenance_mode=TCMG_READER_MAINT_OLD_ECM; else {fprintf(stderr,"WARNING: %s line %d invalid value for 'maintenance_mode' ignored\n",path,line_no);continue;}}
         else if(!strcasecmp(key,"old_ecm_source")){if(!strcasecmp(value,"auto")) reader->old_ecm_source=TCMG_OLD_ECM_SOURCE_AUTO; else if(!strcasecmp(value,"manual")) reader->old_ecm_source=TCMG_OLD_ECM_SOURCE_MANUAL; else {fprintf(stderr,"WARNING: %s line %d invalid value for 'old_ecm_source' ignored\n",path,line_no);continue;}}
-        else if(!strcasecmp(key,"old_ecm_trigger")||!strcasecmp(key,"old_ecm_interval")){/* legacy keys: the interval trigger was removed; old files still load */}
+        else if(!strcasecmp(key,"old_ecm_trigger")||!strcasecmp(key,"old_ecm_interval")){ }
         else if(!strcasecmp(key,"old_ecm_successes")){if(!cfg_parse_i32_range(value,1,1000000,&v)){fprintf(stderr,"WARNING: %s line %d invalid value for 'old_ecm_successes' ignored\n",path,line_no);continue;}reader->old_ecm_successes=v;}
         else if(!strcasecmp(key,"old_ecm")){size_t len=strlen(value);bool valid=len<=TCMG_OLD_ECM_HEX_LEN&&!(len&1u);for(size_t i=0;valid&&i<len;i++)if(!isxdigit((unsigned char)value[i]))valid=false;if(!valid){fprintf(stderr,"WARNING: %s line %d invalid value for 'old_ecm' ignored\n",path,line_no);continue;}tcmg_strlcpy(reader->old_ecm,value,sizeof(reader->old_ecm));}
         else if(!strcasecmp(key,"poll_ms")){if(!cfg_parse_i32_range(value,25,10000,&v)){fprintf(stderr,"WARNING: %s line %d invalid value for 'poll_ms' ignored\n",path,line_no);continue;}reader->poll_ms=v;}

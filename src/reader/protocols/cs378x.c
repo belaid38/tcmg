@@ -107,7 +107,7 @@ int32_t cs378x_reader_do_ecm(int index, const S_READER *reader,
                              uint8_t cw[CW_LEN])
 {
     if (!reader || !ecm || !cw || index < 0 || index >= MAX_READERS ||
-        ecm_len <= 0 || ecm_len > 255) return -1;
+        ecm_len <= 0 || ecm_len > TCMG_MAX_ECM_SIZE) return -1;
     if (!reader->enabled || strcasecmp(reader->protocol, "cs378x") != 0) return -2;
 
     pthread_once(&s_cs_once, cs_reader_init_once);
@@ -119,7 +119,7 @@ int32_t cs378x_reader_do_ecm(int index, const S_READER *reader,
         return -3;
     }
 
-    uint8_t plain[CS378X_HEADER_LEN + 255];
+    uint8_t plain[CS378X_HEADER_LEN + TCMG_MAX_ECM_SIZE];
     memset(plain, 0, sizeof(plain));
     plain[0] = CS378X_CMD_ECM_REQ;
     plain[1] = (uint8_t)ecm_len;

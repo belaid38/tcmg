@@ -9,6 +9,7 @@
 #include "rules.h"
 #include "result.h"
 #include "stats.h"
+#include "../platform/platform.h"
 #include "../cache/cw_cache.h"
 #include "../crypto/crypto.h"
 #include "../security/antishare.h"
@@ -18,9 +19,23 @@
 #include <string.h>
 
 #define READER_WORKER_COUNT MAX_READERS
+#define READER_NEGATIVE_CACHE_SIZE 256
+#define READER_NEGATIVE_CACHE_TTL_MS 1200
 
 typedef struct s_reader_dispatch_ctx S_READER_DISPATCH_CTX;
 typedef struct s_reader_job S_READER_JOB;
+
+typedef struct {
+    bool valid;
+    int reader_index;
+    uint16_t caid;
+    uint16_t sid;
+    uint32_t provid;
+    int32_t ecm_len;
+    uint32_t user_hash;
+    int64_t expires_ms;
+    uint8_t ecm_md5[TCMG_ECM_MD5_LEN];
+} S_READER_NEGATIVE_ENTRY;
 
 struct s_reader_job {
     S_READER_DISPATCH_CTX *ctx;
@@ -28,6 +43,7 @@ struct s_reader_job {
     int index;
     S_READER reader;
     const S_READER_PROTOCOL *protocol;
+    S_READER_STATS_SNAPSHOT stats;
     uint8_t cw[CW_LEN];
     E_READER_FAILURE failure;
 };
@@ -36,7 +52,7 @@ struct s_reader_dispatch_ctx {
     S_ACCOUNT *account;
     S_ECM_REQUEST request;
     char user[CFGKEY_LEN];
-    uint8_t ecm[255];
+    uint8_t ecm[TCMG_MAX_ECM_SIZE];
     uint8_t ecm_md5[TCMG_ECM_MD5_LEN];
     pthread_mutex_t mtx;
     pthread_cond_t cv;
@@ -49,6 +65,8 @@ struct s_reader_dispatch_ctx {
     S_READER_RESULT result;
     uint8_t cw[CW_LEN];
     int jobs_count;
+    int lb_mode;
+    int lb_nbest_readers;
     S_READER_JOB jobs[MAX_READERS];
 };
 
@@ -60,6 +78,112 @@ static pthread_t s_reader_pool_threads[READER_WORKER_COUNT];
 static pthread_once_t s_reader_pool_once = PTHREAD_ONCE_INIT;
 static int s_reader_pool_count;
 static bool s_reader_pool_stop;
+static pthread_mutex_t s_negative_cache_mtx = PTHREAD_MUTEX_INITIALIZER;
+static S_READER_NEGATIVE_ENTRY s_negative_cache[READER_NEGATIVE_CACHE_SIZE];
+static size_t s_negative_cache_next;
+
+static uint32_t reader_user_hash(const char *user)
+{
+    uint32_t h = 2166136261u;
+    if (!user) return h;
+    while (*user) {
+        h ^= (uint8_t)(unsigned char)*user++;
+        h *= 16777619u;
+    }
+    return h;
+}
+
+static bool negative_entry_matches(const S_READER_NEGATIVE_ENTRY *e,
+                                   const S_READER_DISPATCH_CTX *ctx, int reader_index)
+{
+    return e->valid && e->reader_index == reader_index &&
+           e->caid == ctx->request.caid && e->sid == ctx->request.sid &&
+           e->provid == ctx->request.provid && e->ecm_len == ctx->request.ecm_len &&
+           e->user_hash == reader_user_hash(ctx->user) &&
+           memcmp(e->ecm_md5, ctx->ecm_md5, TCMG_ECM_MD5_LEN) == 0;
+}
+
+static bool reader_negative_cache_hit(const S_READER_DISPATCH_CTX *ctx, int reader_index)
+{
+    bool hit = false;
+    int64_t now = tcmg_mono_ms();
+    pthread_mutex_lock(&s_negative_cache_mtx);
+    for (size_t i = 0; i < READER_NEGATIVE_CACHE_SIZE; i++) {
+        S_READER_NEGATIVE_ENTRY *e = &s_negative_cache[i];
+        if (e->valid && e->expires_ms <= now) e->valid = false;
+        if (negative_entry_matches(e, ctx, reader_index)) {
+            hit = true;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&s_negative_cache_mtx);
+    return hit;
+}
+
+static void reader_negative_cache_forget(const S_READER_DISPATCH_CTX *ctx, int reader_index)
+{
+    pthread_mutex_lock(&s_negative_cache_mtx);
+    for (size_t i = 0; i < READER_NEGATIVE_CACHE_SIZE; i++) {
+        S_READER_NEGATIVE_ENTRY *e = &s_negative_cache[i];
+        if (negative_entry_matches(e, ctx, reader_index)) e->valid = false;
+    }
+    pthread_mutex_unlock(&s_negative_cache_mtx);
+}
+
+static void reader_negative_cache_store(const S_READER_DISPATCH_CTX *ctx, int reader_index)
+{
+    S_READER_NEGATIVE_ENTRY *e;
+    if (!ctx || reader_index < 0 || reader_index >= MAX_READERS) return;
+    pthread_mutex_lock(&s_negative_cache_mtx);
+    e = &s_negative_cache[s_negative_cache_next++ % READER_NEGATIVE_CACHE_SIZE];
+    memset(e, 0, sizeof(*e));
+    e->valid = true;
+    e->reader_index = reader_index;
+    e->caid = ctx->request.caid;
+    e->sid = ctx->request.sid;
+    e->provid = ctx->request.provid;
+    e->ecm_len = ctx->request.ecm_len;
+    e->user_hash = reader_user_hash(ctx->user);
+    e->expires_ms = tcmg_mono_ms() + READER_NEGATIVE_CACHE_TTL_MS;
+    memcpy(e->ecm_md5, ctx->ecm_md5, TCMG_ECM_MD5_LEN);
+    pthread_mutex_unlock(&s_negative_cache_mtx);
+}
+
+static int reader_job_compare(const S_READER_JOB *a, const S_READER_JOB *b, int mode)
+{
+    /* A reader that has only returned NOT_FOUND should not outrank an
+     * untried or proven-good reader merely because the negative reply was fast. */
+    bool a_known_bad = a->stats.cw_ok == 0 && a->stats.cw_nok > 0;
+    bool b_known_bad = b->stats.cw_ok == 0 && b->stats.cw_nok > 0;
+    if (a_known_bad != b_known_bad) return a_known_bad ? 1 : -1;
+
+    if (mode == 1) { /* fastest successful CW first; unseen readers warm up first */
+        if ((a->stats.samples == 0) != (b->stats.samples == 0)) return a->stats.samples == 0 ? -1 : 1;
+        if (a->stats.avg_ms != b->stats.avg_ms) return a->stats.avg_ms < b->stats.avg_ms ? -1 : 1;
+    } else if (mode == 2) { /* longest time since last successful ECM first */
+        if ((a->stats.last_ok_s == 0) != (b->stats.last_ok_s == 0)) return a->stats.last_ok_s == 0 ? -1 : 1;
+        if (a->stats.last_ok_s != b->stats.last_ok_s) return a->stats.last_ok_s < b->stats.last_ok_s ? -1 : 1;
+    } else if (mode == 3) { /* lowest live usage first, then successful latency */
+        if (a->stats.busy != b->stats.busy) return a->stats.busy < b->stats.busy ? -1 : 1;
+        if ((a->stats.samples == 0) != (b->stats.samples == 0)) return a->stats.samples == 0 ? -1 : 1;
+        if (a->stats.avg_ms != b->stats.avg_ms) return a->stats.avg_ms < b->stats.avg_ms ? -1 : 1;
+    }
+    return a->index < b->index ? -1 : (a->index > b->index ? 1 : 0);
+}
+
+static void reader_sort_jobs(S_READER_DISPATCH_CTX *ctx)
+{
+    if (!ctx || ctx->lb_mode < 1 || ctx->lb_mode > 3 || ctx->jobs_count < 2) return;
+    for (int i = 1; i < ctx->jobs_count; i++) {
+        S_READER_JOB key = ctx->jobs[i];
+        int j = i;
+        while (j > 0 && reader_job_compare(&key, &ctx->jobs[j - 1], ctx->lb_mode) < 0) {
+            ctx->jobs[j] = ctx->jobs[j - 1];
+            j--;
+        }
+        ctx->jobs[j] = key;
+    }
+}
 
 static int failure_rank(E_READER_FAILURE failure)
 {
@@ -119,6 +243,8 @@ static void reader_job_run(S_READER_JOB *job)
     S_READER_DISPATCH_CTX *ctx;
     S_ECM_REQUEST request;
     int32_t rc;
+    int64_t started_ms;
+    uint32_t elapsed_ms;
 
     if (!job || !job->ctx || !job->protocol || !job->protocol->do_ecm) {
         if (job) reader_job_publish_failure(job);
@@ -140,22 +266,27 @@ static void reader_job_run(S_READER_JOB *job)
         return;
     }
 
+    started_ms = tcmg_mono_ms();
+    reader_stats_job_begin(job->index);
     rc = job->protocol->do_ecm(&(S_READER_ECM_REQUEST){
         .index = job->index,
         .reader = &job->reader,
         .request = &request,
         .failure = &job->failure,
     });
+    elapsed_ms = (uint32_t)(tcmg_mono_ms() - started_ms);
+    reader_stats_job_end(job->index);
 
     if (job->failure == READER_FAILURE_REJECTED) {
         pthread_mutex_lock(&ctx->mtx);
         ctx->whitelist_rejected = true;
         pthread_mutex_unlock(&ctx->mtx);
     } else {
-        reader_stats_record(job->index, rc == EMU_OK);
+        reader_stats_record_timed(job->index, rc == EMU_OK, elapsed_ms);
     }
 
     if (rc == EMU_OK) {
+        reader_negative_cache_forget(ctx, job->index);
         int32_t cache_groups[MAX_GROUPS_PER_READER] = {0};
         int ngrp = job->reader.ngroups;
         if (ngrp <= 0) {
@@ -187,6 +318,9 @@ static void reader_job_run(S_READER_JOB *job)
         return;
     }
 
+    if (ctx->lb_mode >= 1 && ctx->lb_mode <= 3 &&
+        job->failure == READER_FAILURE_NOT_FOUND)
+        reader_negative_cache_store(ctx, job->index);
     tcmg_log_dbg(D_READER,
                  "skip/failed index=%d label='%s' protocol=%s caid=%04X sid=%04X rc=%d",
                  job->index, job->reader.label, job->reader.protocol,
@@ -228,8 +362,12 @@ static void *reader_pool_worker(void *arg)
 static void reader_pool_start_once(void)
 {
     for (int i = 0; i < READER_WORKER_COUNT; i++) {
-        if (pthread_create(&s_reader_pool_threads[i], NULL, reader_pool_worker, NULL) != 0)
+        int trc = pthread_create(&s_reader_pool_threads[i], NULL, reader_pool_worker, NULL);
+        if (trc != 0) {
+            tcmg_log("reader pool worker %d failed rc=%d (%s); continuing with %d workers",
+                     i, trc, strerror(trc), s_reader_pool_count);
             break;
+        }
         s_reader_pool_count++;
     }
 }
@@ -324,6 +462,10 @@ static void reader_fill_jobs(S_READER_DISPATCH_CTX *ctx)
     if (!ctx) return;
 
     pthread_rwlock_rdlock(&g_cfg.acc_lock);
+    ctx->lb_mode = g_cfg.lb_mode;
+    ctx->lb_nbest_readers = g_cfg.lb_nbest_readers;
+    if (ctx->lb_nbest_readers < 1) ctx->lb_nbest_readers = 1;
+    if (ctx->lb_nbest_readers > MAX_READERS) ctx->lb_nbest_readers = MAX_READERS;
     for (int i = 0; i < MAX_READERS && ctx->jobs_count < MAX_READERS; i++) {
         const S_READER *reader = &g_cfg.readers[i];
         if (!reader->in_use || !reader->enabled) continue;
@@ -333,11 +475,20 @@ static void reader_fill_jobs(S_READER_DISPATCH_CTX *ctx)
                                                        ctx->request.provid, ctx->request.ecm_len);
         if (rule != READER_RULE_ALLOW) {
             if (rule == READER_RULE_ECM_WHITELIST) {
+                char whitelist_spec[CFGVAL_LEN];
                 ctx->whitelist_rejected = true;
-                tcmg_log("ecm rejected label='%s' caid=%04X sid=%04X len=%d whitelist=%d",
+                reader_ecm_whitelist_get_spec(reader, whitelist_spec, sizeof(whitelist_spec));
+                tcmg_log("ecm rejected label='%s' caid=%04X sid=%04X len=%d whitelist='%s'",
                          reader->label, ctx->request.caid, ctx->request.sid,
-                         ctx->request.ecm_len, reader->ecm_whitelist);
+                         ctx->request.ecm_len, whitelist_spec);
             }
+            continue;
+        }
+
+        if (ctx->lb_mode >= 1 && ctx->lb_mode <= 3 && reader_negative_cache_hit(ctx, i)) {
+            tcmg_log_dbg(D_READER,
+                         "short negative-cache skip index=%d label='%s' caid=%04X sid=%04X len=%d",
+                         i, reader->label, ctx->request.caid, ctx->request.sid, ctx->request.ecm_len);
             continue;
         }
 
@@ -355,9 +506,11 @@ static void reader_fill_jobs(S_READER_DISPATCH_CTX *ctx)
         job->reader = *reader;
         job->protocol = protocol;
         job->failure = READER_FAILURE_NONE;
+        reader_stats_snapshot(i, &job->stats);
         ctx->attempted = true;
     }
     pthread_rwlock_unlock(&g_cfg.acc_lock);
+    reader_sort_jobs(ctx);
 }
 
 
@@ -371,7 +524,7 @@ int32_t reader_dispatch_ecm(const S_ECM_REQUEST *request, S_READER_RESULT *resul
 
     if (result) reader_result_init(result);
     if (!request || !request->account || !request->ecm || !request->cw ||
-        request->ecm_len <= 0 || request->ecm_len > 255)
+        request->ecm_len <= 0 || request->ecm_len > TCMG_MAX_ECM_SIZE)
         return -1;
 
     if (request->ecm_md5_valid) {
@@ -470,33 +623,45 @@ int32_t reader_dispatch_ecm(const S_ECM_REQUEST *request, S_READER_RESULT *resul
         return READER_RESULT_REJECTED;
     }
 
-    if (ctx->jobs_count == 1) {
-        ctx->active_jobs = 1;
-        reader_job_run(&ctx->jobs[0]);
-    } else {
-        if (!reader_pool_available()) {
-            ctx->active_jobs = ctx->jobs_count;
-            for (int i = 0; i < ctx->jobs_count; i++) {
-                reader_job_run(&ctx->jobs[i]);
-                if (ctx->winner) break;
-            }
-        } else {
-            pthread_mutex_lock(&ctx->mtx);
-            ctx->active_jobs = ctx->jobs_count;
-            pthread_mutex_unlock(&ctx->mtx);
+    {
+        bool use_lb = ctx->lb_mode >= 1 && ctx->lb_mode <= 3;
+        int batch_size = use_lb ? ctx->lb_nbest_readers : ctx->jobs_count;
+        bool pool_ok = ctx->jobs_count > 1 ? reader_pool_available() : false;
+        if (batch_size < 1) batch_size = 1;
 
-            for (int i = 0; i < ctx->jobs_count; i++) {
-                reader_ctx_retain(ctx);
-                if (!reader_pool_submit(&ctx->jobs[i])) {
-                    reader_job_cancel(&ctx->jobs[i]);
-                    reader_ctx_release(ctx);
+        for (int first = 0; first < ctx->jobs_count; first += batch_size) {
+            int count = ctx->jobs_count - first;
+            if (count > batch_size) count = batch_size;
+            pthread_mutex_lock(&ctx->mtx);
+            bool already_won = ctx->winner;
+            pthread_mutex_unlock(&ctx->mtx);
+            if (already_won) break;
+
+            if (count == 1 || !pool_ok) {
+                pthread_mutex_lock(&ctx->mtx);
+                ctx->active_jobs = count;
+                pthread_mutex_unlock(&ctx->mtx);
+                for (int i = 0; i < count; i++)
+                    reader_job_run(&ctx->jobs[first + i]);
+            } else {
+                pthread_mutex_lock(&ctx->mtx);
+                ctx->active_jobs = count;
+                pthread_mutex_unlock(&ctx->mtx);
+                for (int i = 0; i < count; i++) {
+                    S_READER_JOB *job = &ctx->jobs[first + i];
+                    reader_ctx_retain(ctx);
+                    if (!reader_pool_submit(job)) {
+                        reader_job_cancel(job);
+                        reader_ctx_release(ctx);
+                    }
                 }
+                pthread_mutex_lock(&ctx->mtx);
+                while (!ctx->winner && ctx->active_jobs > 0)
+                    pthread_cond_wait(&ctx->cv, &ctx->mtx);
+                pthread_mutex_unlock(&ctx->mtx);
             }
 
-            pthread_mutex_lock(&ctx->mtx);
-            while (!ctx->winner && ctx->active_jobs > 0)
-                pthread_cond_wait(&ctx->cv, &ctx->mtx);
-            pthread_mutex_unlock(&ctx->mtx);
+            if (!use_lb) break;
         }
     }
 

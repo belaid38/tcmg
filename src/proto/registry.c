@@ -3,12 +3,14 @@
 #include "cccam.h"
 #include "newcamd.h"
 #include "camd35_server.h"
+#include "camd35_udp_server.h"
 #include <string.h>
 
 static const S_PROTO_MODULE s_modules[] = {
     { "cccam",  cccam_start,  cccam_stop  },
     { "newcamd", newcamd_start, newcamd_stop },
     { "cs378x",  cs378x_start,  cs378x_stop  },
+    { "camd35",  camd35_udp_start, camd35_udp_stop },
 };
 
 size_t proto_module_count(void)

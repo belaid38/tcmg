@@ -1,9 +1,14 @@
 #define MODULE_LOG_PREFIX "conf"
 #include "config_internal.h"
 #include "../reader/protocol.h"
+#include "../reader/rules.h"
 
 #ifndef TCMG_OS_WINDOWS
 #include <unistd.h>
+#include <fcntl.h>
+#else
+#include <fcntl.h>
+#include <io.h>
 #endif
 
 static pthread_mutex_t s_save_mtx = PTHREAD_MUTEX_INITIALIZER;
@@ -24,33 +29,128 @@ bool cfg_appendf(char *buf, size_t cap, size_t *pos, const char *fmt, ...)
     return true;
 }
 
+#ifdef TCMG_OS_WINDOWS
+static _Atomic unsigned long s_cfg_tmp_seq;
+
+static FILE *cfg_open_unique_temp(const char *path, char *tmp, size_t tmp_sz)
+{
+    for (unsigned int attempt = 0; attempt < 64; attempt++) {
+        unsigned long seq = atomic_fetch_add_explicit(&s_cfg_tmp_seq, 1, memory_order_relaxed) + 1;
+        int n = snprintf(tmp, tmp_sz, "%s.tmp.%lu.%lu", path,
+                         (unsigned long)GetCurrentProcessId(), seq);
+        if (n < 0 || (size_t)n >= tmp_sz) { errno = ENAMETOOLONG; return NULL; }
+
+        HANDLE h = CreateFileA(tmp, GENERIC_WRITE, 0, NULL, CREATE_NEW,
+                               FILE_ATTRIBUTE_NORMAL, NULL);
+        if (h == INVALID_HANDLE_VALUE) {
+            DWORD e = GetLastError();
+            if (e == ERROR_FILE_EXISTS || e == ERROR_ALREADY_EXISTS) continue;
+            errno = EACCES;
+            return NULL;
+        }
+        int fd = _open_osfhandle((intptr_t)h, _O_WRONLY | _O_BINARY);
+        if (fd < 0) {
+            CloseHandle(h);
+            DeleteFileA(tmp);
+            return NULL;
+        }
+        FILE *f = _fdopen(fd, "wb");
+        if (!f) {
+            _close(fd);
+            DeleteFileA(tmp);
+            return NULL;
+        }
+        return f;
+    }
+    errno = EEXIST;
+    return NULL;
+}
+#else
+static FILE *cfg_open_unique_temp(const char *path, char *tmp, size_t tmp_sz)
+{
+    int n = snprintf(tmp, tmp_sz, "%s.tmp.XXXXXX", path);
+    if (n < 0 || (size_t)n >= tmp_sz) { errno = ENAMETOOLONG; return NULL; }
+
+    int fd = mkstemp(tmp); /* Creates a unique file with mode 0600. */
+    if (fd < 0) return NULL;
+    if (fchmod(fd, S_IRUSR | S_IWUSR) != 0) {
+        int saved_errno = errno;
+        close(fd);
+        unlink(tmp);
+        errno = saved_errno;
+        return NULL;
+    }
+    FILE *f = fdopen(fd, "wb");
+    if (!f) {
+        int saved_errno = errno;
+        close(fd);
+        unlink(tmp);
+        errno = saved_errno;
+        return NULL;
+    }
+    return f;
+}
+
+static void cfg_sync_parent_dir(const char *path)
+{
+    char dir[CFGPATH_LEN];
+    size_t len;
+    char *slash;
+    int fd;
+
+    len = strlen(path);
+    if (len >= sizeof(dir)) return;
+    memcpy(dir, path, len + 1);
+    slash = strrchr(dir, '/');
+    if (!slash) {
+        tcmg_strlcpy(dir, ".", sizeof(dir));
+    } else if (slash == dir) {
+        dir[1] = '\0';
+    } else {
+        *slash = '\0';
+    }
+    fd = open(dir, O_RDONLY);
+    if (fd >= 0) {
+        (void)fsync(fd);
+        close(fd);
+    }
+}
+#endif
+
 bool cfg_write_atomic(const char *path, const char *data)
 {
-    char tmp[CFGPATH_LEN + 32];
+    char tmp[CFGPATH_LEN + 64];
     FILE *f;
     size_t len;
 
     if (!path || !data || !path[0]) return false;
-    if (snprintf(tmp, sizeof(tmp), "%s.new", path) <= 0 || strlen(tmp) >= sizeof(tmp)) return false;
-
-    f = fopen(tmp, "wb");
-    if (!f) return false;
+    f = cfg_open_unique_temp(path, tmp, sizeof(tmp));
+    if (!f) {
+        tcmg_log("config temp file create failed: %s", strerror(errno));
+        return false;
+    }
 
     len = strlen(data);
     if (fwrite(data, 1, len, f) != len || fflush(f) != 0) {
+        int saved_errno = errno;
         fclose(f);
         remove(tmp);
+        errno = saved_errno;
         return false;
     }
 #ifndef TCMG_OS_WINDOWS
     if (fsync(fileno(f)) != 0) {
+        int saved_errno = errno;
         fclose(f);
-        remove(tmp);
+        unlink(tmp);
+        errno = saved_errno;
         return false;
     }
 #endif
     if (fclose(f) != 0) {
+        int saved_errno = errno;
         remove(tmp);
+        errno = saved_errno;
         return false;
     }
 
@@ -61,18 +161,55 @@ bool cfg_write_atomic(const char *path, const char *data)
     }
 #else
     if (rename(tmp, path) != 0) {
-        remove(tmp);
+        int saved_errno = errno;
+        unlink(tmp);
+        errno = saved_errno;
         return false;
     }
+    cfg_sync_parent_dir(path);
 #endif
     return true;
 }
 
-bool cfg_build_global_text(const S_CONFIG*c,char*buf,size_t cap)
+bool cfg_build_global_text(const S_CONFIG *c, char *buf, size_t cap)
 {
-    size_t p=0;bool ok=cfg_appendf(buf,cap,&p,"# TCMG global configuration\n\n[global]\nsocket_timeout = %d\nserver_keepalive = %d\nserver_keepalive_misses = %d\necm_log = %d\nscheduled_restart = %d\nscheduled_restart_time = %02d:%02d\nlogfile = %s\nusrfile = %s\n\n[webif]\nenabled = %d\nport = %d\nrefresh = %d\nuser = %s\npassword = %s\nbindaddr = %s\n\n[newcamd]\nport = %d\nbindaddr = %s\nkey = ",c->sock_timeout,c->server_keepalive,c->server_keepalive_misses,c->ecm_log,c->scheduled_restart_enabled,c->scheduled_restart_minutes/60,c->scheduled_restart_minutes%60,c->logfile,c->usrfile,c->webif_enabled,c->webif_port,c->webif_refresh,c->webif_user,c->webif_pass,c->webif_bindaddr,c->newcamd_port,c->newcamd_bindaddr);
-    for(int i=0;i<14&&ok;i++)ok=cfg_appendf(buf,cap,&p,"%02X",c->newcamd_key[i]);
-    ok=ok&&cfg_appendf(buf,cap,&p,"\nkeepalive = %d\nmode = %s\n\n[cccam]\nport = %d\nbindaddr = %s\n\n[cs378x]\nport = %d\nbindaddr = %s\n\n[failban]\nenabled = %d\nallowlist = %s\nmax_fails = %d\nban_secs = %d\n\n[seller]\nname = %s\ntype = %s\nhost = %s\nport = %d\n",c->newcamd_keepalive,c->newcamd_mgclient?"mgcamd":"auto",c->cccam_port,c->cccam_bindaddr,c->cs378x_port,c->cs378x_bindaddr,c->failban_enabled,c->failban_allowlist,c->failban_max_fails,c->failban_ban_secs,c->seller_name,c->seller_type,c->seller_host,c->seller_port);return ok;
+    size_t p = 0;
+    bool ok;
+
+    if (!c || !buf || cap == 0) return false;
+    ok = cfg_appendf(buf, cap, &p,
+        "# TCMG global configuration\n\n[global]\n"
+        "socket_timeout = %d\nserver_keepalive = %d\nserver_keepalive_misses = %d\n"
+        "ecm_log = %d\nscheduled_restart = %d\nscheduled_restart_time = %02d:%02d\n"
+        "logfile = %s\nusrfile = %s\nlb_mode = %d\nlb_nbest_readers = %d\n\n"
+        "[webif]\nenabled = %d\nport = %d\nrefresh = %d\nuser = %s\npassword = %s\nbindaddr = %s\n\n"
+        "[newcamd]\nport = %d\nbindaddr = %s\nkey = ",
+        c->sock_timeout, c->server_keepalive, c->server_keepalive_misses,
+        c->ecm_log, c->scheduled_restart_enabled,
+        c->scheduled_restart_minutes / 60, c->scheduled_restart_minutes % 60,
+        c->logfile, c->usrfile, c->lb_mode, c->lb_nbest_readers,
+        c->webif_enabled, c->webif_port, c->webif_refresh, c->webif_user,
+        c->webif_pass, c->webif_bindaddr, c->newcamd_port, c->newcamd_bindaddr);
+    for (int i = 0; i < 14 && ok; i++)
+        ok = cfg_appendf(buf, cap, &p, "%02X", c->newcamd_key[i]);
+    ok = ok && cfg_appendf(buf, cap, &p,
+        "\nkeepalive = %d\nmode = %s\n\n"
+        "[cccam]\nport = %d\nbindaddr = %s\n\n"
+        "[cs378x]\nport = %d\nbindaddr = %s\n\n"
+        "[camd35]\nport = %d\nbindaddr = %s\n\n"
+        "[failban]\nenabled = %d\nallowlist = %s\nmax_fails = %d\nban_secs = %d\n\n"
+        "[seller]\nname = %s\ntype = %s\nhost = %s\nport = %d\n\n"
+        "[dvbapi]\nenabled = %d\nuser = %s\nsocket = %s\nboxtype = %s\n"
+        "delay = %d\nmax_services = %d\npmt_mode = %d\nlisten_port = %d\nserverip = %s\n",
+        c->newcamd_keepalive, c->newcamd_mgclient ? "mgcamd" : "auto",
+        c->cccam_port, c->cccam_bindaddr, c->cs378x_port, c->cs378x_bindaddr,
+        c->camd35_port, c->camd35_bindaddr, c->failban_enabled,
+        c->failban_allowlist, c->failban_max_fails, c->failban_ban_secs,
+        c->seller_name, c->seller_type, c->seller_host, c->seller_port,
+        c->dvbapi_enabled, c->dvbapi_user, c->dvbapi_socket, c->dvbapi_boxtype,
+        c->dvbapi_delay_ms, c->dvbapi_max_services, c->dvbapi_pmt_mode,
+        c->dvbapi_listen_port, c->dvbapi_serverip);
+    return ok;
 }
 
 bool cfg_build_user_text(const S_CONFIG *c, char *buf, size_t cap)
@@ -111,9 +248,11 @@ bool cfg_build_server_text(const S_CONFIG *c, char *buf, size_t cap)
                 ok = cfg_appendf(buf, cap, &pos, "%s%04X:%08X", j ? "," : "", r->idents[j].caid, r->idents[j].provid);
         }
 
+        char ecmwl[CFGVAL_LEN];
+        reader_ecm_whitelist_get_spec(r, ecmwl, sizeof(ecmwl));
         ok = ok && cfg_appendf(buf, cap, &pos,
-                           "\necmwhitelist = %02X\ninactivitytimeout = %d\n",
-                           (unsigned)(r->ecm_whitelist & 0xFF), r->inactivitytimeout);
+                           "\necmwhitelist = %s\ninactivitytimeout = %d\n",
+                           ecmwl, r->inactivitytimeout);
 
         if (reader_protocol_kind(r->protocol) == READER_PROTOCOL_NETWORK) {
             ok = ok && cfg_appendf(buf, cap, &pos,
@@ -135,6 +274,8 @@ bool cfg_build_server_text(const S_CONFIG *c, char *buf, size_t cap)
                                "device = %s\nmaintenance_mode = %s\nfast_reset = %d\nfast_reset_idle = %d\nold_ecm_source = %s\nold_ecm_successes = %d\nold_ecm = %s\n",
                                r->device, maintenance, r->fast_reset, r->fast_reset_idle, source,
                                r->old_ecm_successes, r->old_ecm);
+            if (strcasecmp(r->protocol, "internal") == 0)
+                ok = ok && cfg_appendf(buf, cap, &pos, "deprecated = %d\n", r->deprecated ? 1 : 0);
             if (strcasecmp(r->protocol, "pcsc") == 0 ||
                 strcasecmp(r->protocol, "serial") == 0) {
                 ok = ok && cfg_appendf(buf, cap, &pos, "poll_ms = %d\n", r->poll_ms);
@@ -238,7 +379,7 @@ bool cfg_write_default(const char *path)
         "[webif]\n"
         "enabled = 1\n"
         "port = 8585\n"
-        "bindaddr = 0.0.0.0\n";
+        "bindaddr = 127.0.0.1\n";
 
     static const char user_text[] =
         "# TCMG accounts\n"
@@ -257,6 +398,6 @@ bool cfg_write_default(const char *path)
     if (!cfg_write_default_if_missing(user_file, user_text)) return false;
     if (!cfg_write_default_if_missing(reader_file, reader_text)) return false;
 
-    tcmg_log("initial configuration created: webif=0.0.0.0:8585, accounts=0, readers=0");
+    tcmg_log("initial configuration created: webif=127.0.0.1:8585, accounts=0, readers=0");
     return true;
 }

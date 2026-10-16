@@ -25,18 +25,21 @@ void send_page_config(int fd)
 		snprintf(key_hex + i * 2, 3, "%02X", cfg.newcamd_key[i]);
 	key_hex[28] = '\0';
 
-	char esc_nm_bind[256], esc_cs_bind[256], esc_logfile[512], esc_wi_bind[256];
+	char esc_nm_bind[256], esc_cs_bind[256], esc_cm_bind[256], esc_logfile[512], esc_wi_bind[256];
 	char esc_wi_user[256], esc_wi_pass[256], esc_failban_allow[CFGVAL_LEN*2];
 
 	html_escape(cfg.newcamd_bindaddr, esc_nm_bind, sizeof(esc_nm_bind));
 	html_escape(cfg.cs378x_bindaddr, esc_cs_bind, sizeof(esc_cs_bind));
+	html_escape(cfg.camd35_bindaddr, esc_cm_bind, sizeof(esc_cm_bind));
 	html_escape(cfg.logfile, esc_logfile, sizeof(esc_logfile));
 	html_escape(cfg.webif_bindaddr, esc_wi_bind, sizeof(esc_wi_bind));
 	html_escape(cfg.webif_user, esc_wi_user, sizeof(esc_wi_user));
 	html_escape(cfg.webif_pass, esc_wi_pass, sizeof(esc_wi_pass));
 		html_escape(cfg.failban_allowlist, esc_failban_allow, sizeof(esc_failban_allow));
 
-	char esc_sname[CFGVAL_LEN * 6], esc_shost[CFGKEY_LEN * 6];
+	char esc_sname[CFGVAL_LEN * 6], esc_shost[CFGKEY_LEN * 6], esc_dvuser[CFGKEY_LEN * 6], esc_dvsock[CFGPATH_LEN * 6];
+	html_escape(cfg.dvbapi_user, esc_dvuser, sizeof(esc_dvuser));
+	html_escape(cfg.dvbapi_socket, esc_dvsock, sizeof(esc_dvsock));
 	html_escape(cfg.seller_name, esc_sname, sizeof(esc_sname));
 	html_escape(cfg.seller_host, esc_shost, sizeof(esc_shost));
 
@@ -58,8 +61,10 @@ void send_page_config(int fd)
 		CFG_NUM("cf_newcamd_port", "Newcamd port", "0", "65535", "%d", "")
 		CFG_NUM("cf_cccam_port",   "CCcam port",   "0", "65535", "%d", "")
 		CFG_NUM("cf_cs378x_port",  "CS378X port",  "0", "65535", "%d", "")
+		CFG_NUM("cf_camd35_port",  "CAMD35 UDP port", "0", "65535", "%d", "")
 		CFG_TXT("cf_newcamd_bindaddr", "Newcamd bind", "0.0.0.0", "")
 		CFG_TXT("cf_cs378x_bindaddr",  "CS378X bind",  "0.0.0.0", "")
+		CFG_TXT("cf_camd35_bindaddr", "CAMD35 UDP bind", "0.0.0.0", "")
 		CFG_NUM("cf_sock_timeout",  "Socket timeout (s)", "5", "600",  "%d", "")
 		CFG_NUM("cf_server_keepalive", "Keepalive (s)",   "0", "3600", "%d", "")
 		CFG_NUM("cf_server_keepalive_misses", "Keepalive misses", "1", "20", "%d", "")
@@ -103,34 +108,51 @@ void send_page_config(int fd)
 		"<input class='cfg-input' id='cf_seller_name' maxlength='80' autocomplete='off' placeholder='Your service name' value='%s'></div>"
 		"<div class='cfg-field'><label class='cfg-label' for='cf_seller_type'>Server type</label>"
 		"<select class='cfg-input' id='cf_seller_type' onchange='sellerAuto()'>"
-		"<option value='cccam'%s>CCcam</option><option value='newcamd'%s>Newcamd</option><option value='cs378x'%s>CS378X</option></select></div>"
+		"<option value='cccam'%s>CCcam</option><option value='newcamd'%s>Newcamd</option><option value='cs378x'%s>CS378X</option><option value='camd35'%s>CAMD35 UDP</option></select></div>"
 		"<div class='cfg-field w2'><label class='cfg-label' for='cf_seller_host'>Host</label>"
 		"<input class='cfg-input mono' id='cf_seller_host' maxlength='60' autocomplete='off' spellcheck='false' value='%s'></div>"
 		"</div></section>"
 
+		"<section class='cfg-card'><div class='cfg-title'>DVBAPI (this receiver)</div><div class='cfg-grid'>"
+		"<div class='cfg-checks w3'>" CFG_CHK("cf_dvbapi_enabled", "Enable DVBAPI (descramble directly on this device)") "</div>"
+		"<div class='cfg-field'><label class='cfg-label' for='cf_dvbapi_user'>Account</label>"
+		"<input class='cfg-input mono' id='cf_dvbapi_user' maxlength='60' autocomplete='off' spellcheck='false' value='%s'></div>"
+		"<div class='cfg-field'><label class='cfg-label' for='cf_dvbapi_boxtype'>Box type</label>"
+		"<select class='cfg-input' id='cf_dvbapi_boxtype'>"
+		"<option value='auto'%s>Auto (Enigma2 / Linux DVB)</option><option value='dreambox'%s>Dreambox</option>"
+		"<option value='duckbox'%s>Duckbox (ca offset 1)</option><option value='ufs910'%s>UFS910 (ca offset 1)</option></select></div>"
+		 CFG_NUM("cf_dvbapi_max_services", "Max services", "1", "32", "%d", "")
+		"<div class='cfg-field w2'><label class='cfg-label' for='cf_dvbapi_socket'>Socket</label>"
+		"<input class='cfg-input mono' id='cf_dvbapi_socket' maxlength='200' autocomplete='off' spellcheck='false' value='%s'></div>"
+		 CFG_NUM("cf_dvbapi_delay", "ECM delay (ms)", "0", "60000", "%d", "")
+		"</div></section>"
+
 		"</div></div>",
-		/* Servers */
-		cfg.newcamd_port, cfg.cccam_port, cfg.cs378x_port,
-		esc_nm_bind, esc_cs_bind,
+		cfg.newcamd_port, cfg.cccam_port, cfg.cs378x_port, cfg.camd35_port,
+		esc_nm_bind, esc_cs_bind, esc_cm_bind,
 		cfg.sock_timeout, cfg.server_keepalive, cfg.server_keepalive_misses,
 		key_hex,
 		cfg.newcamd_keepalive ? " checked" : "",
 		cfg.newcamd_mgclient ? " checked" : "",
-		/* Fail-Ban */
 		esc_failban_allow, cfg.failban_max_fails, cfg.failban_ban_secs,
 		cfg.failban_enabled ? " checked" : "",
-		/* Web */
 		cfg.webif_port, esc_wi_bind, esc_wi_user, esc_wi_pass, cfg.webif_refresh,
-		/* Logging & restart */
 		esc_logfile, cfg.scheduled_restart_time,
 		cfg.ecm_log ? " checked" : "",
 		cfg.scheduled_restart_enabled ? " checked" : "",
-		/* Seller */
 		esc_sname,
 		!strcmp(cfg.seller_type, "cccam") ? " selected" : "",
 		!strcmp(cfg.seller_type, "newcamd") ? " selected" : "",
 		!strcmp(cfg.seller_type, "cs378x") ? " selected" : "",
-		esc_shost);
+		!strcmp(cfg.seller_type, "camd35") ? " selected" : "",
+		esc_shost,
+		cfg.dvbapi_enabled ? " checked" : "",
+		esc_dvuser,
+		!strcmp(cfg.dvbapi_boxtype, "auto") ? " selected" : "",
+		!strcmp(cfg.dvbapi_boxtype, "dreambox") ? " selected" : "",
+		!strcmp(cfg.dvbapi_boxtype, "duckbox") ? " selected" : "",
+		!strcmp(cfg.dvbapi_boxtype, "ufs910") ? " selected" : "",
+		cfg.dvbapi_max_services, esc_dvsock, cfg.dvbapi_delay_ms);
 
 	pos = buf_printf(&buf, &bsz, pos,
 		"<div class='cfg-save'>"
@@ -175,6 +197,8 @@ void send_page_config(int fd)
 		"  p.set('cccam_port',cfgEl('cf_cccam_port').value);"
 		"  p.set('cs378x_port',cfgEl('cf_cs378x_port').value);"
 		"  p.set('cs378x_bindaddr',cfgEl('cf_cs378x_bindaddr').value);"
+		"  p.set('camd35_port',cfgEl('cf_camd35_port').value);"
+		"  p.set('camd35_bindaddr',cfgEl('cf_camd35_bindaddr').value);"
 		"  p.set(\'sock_timeout\',cfgEl(\'cf_sock_timeout\').value);"
 		"  p.set(\'server_keepalive\',cfgEl(\'cf_server_keepalive\').value);"
 		"  p.set(\'server_keepalive_misses\',cfgEl(\'cf_server_keepalive_misses\').value);"
@@ -190,6 +214,12 @@ void send_page_config(int fd)
 		"  p.set('seller_name',cfgEl('cf_seller_name').value.trim());"
 		"  p.set('seller_type',cfgEl('cf_seller_type').value);"
 		"  p.set('seller_host',cfgEl('cf_seller_host').value.trim());"
+		"  p.set('dvbapi_enabled',cfgEl('cf_dvbapi_enabled').checked?'1':'0');"
+		"  p.set('dvbapi_user',cfgEl('cf_dvbapi_user').value.trim());"
+		"  p.set('dvbapi_boxtype',cfgEl('cf_dvbapi_boxtype').value);"
+		"  p.set('dvbapi_socket',cfgEl('cf_dvbapi_socket').value.trim());"
+		"  p.set('dvbapi_delay',cfgEl('cf_dvbapi_delay').value);"
+		"  p.set('dvbapi_max_services',cfgEl('cf_dvbapi_max_services').value);"
 		"  p.set(\'failban_enabled\',cfgEl(\'cf_failban_enabled\').checked?\'1\':\'0\');"
 		"  p.set(\'failban_allowlist\',cfgEl(\'cf_failban_allowlist\').value);"
 		"  p.set(\'failban_max_fails\',cfgEl(\'cf_failban_max_fails\').value);"

@@ -12,9 +12,10 @@
 #define D_CONN      0x0040
 #define D_READER    0x0080
 #define D_PROTOCOL  0x0100
+#define D_DVBAPI    0x0200
 #define D_ALL       0xFFFF
 
-#define MAX_DEBUG_LEVELS 9
+#define MAX_DEBUG_LEVELS 10
 
 typedef struct {
     uint16_t mask;

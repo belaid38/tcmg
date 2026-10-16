@@ -7,7 +7,7 @@
 #include "proto/cccam.h"
 #include "proto/cccam_crypto.h"
 
-#define CC_READER_MAX_MSG 1024
+#define CC_READER_MAX_MSG 2048
 #define CC_READER_CARD_MAX 64
 
 typedef struct {
@@ -311,7 +311,7 @@ int32_t cccam_reader_do_ecm(int index, const S_READER *reader,
                             const uint8_t *ecm, int32_t ecm_len,
                             uint8_t cw[CW_LEN])
 {
-    if (!reader || !ecm || !cw || index < 0 || index >= MAX_READERS || ecm_len <= 0 || ecm_len > 255)
+    if (!reader || !ecm || !cw || index < 0 || index >= MAX_READERS || ecm_len <= 0 || ecm_len > TCMG_MAX_ECM_SIZE)
         return -1;
     if (!reader->enabled || strcasecmp(reader->protocol, "cccam") != 0) return -2;
 
@@ -330,7 +330,7 @@ int32_t cccam_reader_do_ecm(int index, const S_READER *reader,
         return -4;
     }
 
-    uint8_t payload[13 + 255];
+    uint8_t payload[13 + TCMG_MAX_ECM_SIZE];
     payload[0] = (uint8_t)(caid >> 8); payload[1] = (uint8_t)caid;
     payload[2] = (uint8_t)(provid >> 24); payload[3] = (uint8_t)(provid >> 16);
     payload[4] = (uint8_t)(provid >> 8); payload[5] = (uint8_t)provid;

@@ -93,7 +93,7 @@ void send_page_status(int fd)
 		"<thead><tr>"
 		"<th style='width:30px' title='Location'>" ICO_GLOBE "</th>"
 		"<th>User</th><th>IP Address</th><th>CAID</th>"
-		"<th>SID</th><th>Channel</th><th>Connected</th><th>Idle</th><th></th>"
+		"<th>SID</th><th>Channel</th><th>Last 60s</th><th>Connected</th><th>Idle</th><th></th>"
 		"</tr></thead>"
 		"<tbody id='p_clients'>"
 		"</tbody></table></div>");

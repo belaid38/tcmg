@@ -29,6 +29,8 @@ bool cfg_parse_file(const char *path,cfg_kv_callback cb,void *ctx,char *err,size
         E_CFG_CB_RESULT rc;
         line_no++;
         if(!strchr(line,'\n')&&!feof(f)){
+            int ch;
+            while((ch=fgetc(f))!=EOF && ch!='\n') { }
             fprintf(stderr,"WARNING: %s line %d line too long ignored\n",path,line_no);
             section_valid=0;
             continue;

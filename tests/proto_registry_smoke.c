@@ -5,8 +5,8 @@
 
 int main(void)
 {
-    static const char *names[] = {"cccam", "newcamd", "cs378x"};
-    assert(proto_module_count() == 3);
+    static const char *names[] = {"cccam", "newcamd", "cs378x", "camd35"};
+    assert(proto_module_count() == 4);
 
     for (size_t i = 0; i < proto_module_count(); i++) {
         const S_PROTO_MODULE *m = proto_module_at(i);

@@ -7,6 +7,7 @@
 #include "reader/result.h"
 #include "reader/stats.h"
 #include "account/account.h"
+#include "core/utils.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -33,13 +34,41 @@ int main(int argc, char **argv) {
         return 7;
     }
     reader_stats_reset(0);
+    reader_stats_record_timed(0, false, 2);
+    S_READER_STATS_SNAPSHOT failed_timing_stats;
+    reader_stats_snapshot(0, &failed_timing_stats);
+    if (failed_timing_stats.cw_nok != 1 || failed_timing_stats.samples != 0 || failed_timing_stats.avg_ms != 0) {
+        fprintf(stderr,"FAIL failed ECM must not train fastest-reader timing\n");
+        return 10;
+    }
+    reader_stats_reset(0);
+    reader_stats_job_begin(0);
+    S_READER_STATS_SNAPSHOT busy_stats;
+    reader_stats_snapshot(0, &busy_stats);
+    if (busy_stats.busy != 1) {
+        fprintf(stderr,"FAIL reader busy accounting begin=%d\n", busy_stats.busy);
+        return 8;
+    }
+    reader_stats_record_timed(0, true, 40);
+    reader_stats_job_end(0);
+    S_READER_STATS_SNAPSHOT timed_stats;
+    reader_stats_snapshot(0, &timed_stats);
+    if (timed_stats.busy != 0 || timed_stats.samples != 1 || timed_stats.avg_ms != 40 || timed_stats.cw_ok != 1) {
+        fprintf(stderr,"FAIL timed reader stats busy=%d samples=%u avg=%u cw_ok=%lld\n",
+                timed_stats.busy, timed_stats.samples, timed_stats.avg_ms,
+                (long long)timed_stats.cw_ok);
+        return 9;
+    }
+    reader_stats_reset(0);
     bool expect_login_fail = false;
+    bool expect_negative_cache = false;
     if (argc == 3 && strcmp(argv[2], "expect-login-fail") == 0) expect_login_fail = true;
-    if (argc != 2 && !expect_login_fail) {
-        fprintf(stderr,"usage: %s <config-dir/tcmg.conf> [expect-login-fail]\n", argv[0]);
+    if (argc == 3 && strcmp(argv[2], "expect-negative-cache") == 0) expect_negative_cache = true;
+    if (argc != 2 && !expect_login_fail && !expect_negative_cache) {
+        fprintf(stderr,"usage: %s <config-dir/tcmg.conf> [expect-login-fail|expect-negative-cache]\n", argv[0]);
         return 2;
     }
-    if (argc == 3 && !expect_login_fail) return 2;
+    if (argc == 3 && !expect_login_fail && !expect_negative_cache) return 2;
     memset(&g_cfg,0,sizeof(g_cfg));
     pthread_rwlock_init(&g_cfg.acc_lock,NULL);
     pthread_mutex_init(&g_cfg.ban_lock,NULL);
@@ -68,6 +97,43 @@ int main(int argc, char **argv) {
         if (rc == 0) {
             fprintf(stderr,"FAIL: login unexpectedly succeeded\n");
             overall = 1;
+        }
+    }
+    else if (expect_negative_cache) {
+        int reader_index = -1;
+        for (int i = 0; i < MAX_READERS; i++) {
+            if (!g_cfg.readers[i].in_use) continue;
+            if (reader_index < 0) reader_index = i;
+            else g_cfg.readers[i].enabled = 0;
+        }
+        if (reader_index < 0) {
+            fprintf(stderr,"FAIL: negative-cache test has no configured reader\n");
+            overall = 1;
+        } else {
+            S_READER *reader = &g_cfg.readers[reader_index];
+            tcmg_strlcpy(reader->protocol, "emu", sizeof(reader->protocol));
+            reader->nkeys = 0;
+            reader->ecm_whitelist = 0;
+            reader->ecm_whitelist_count = 0;
+            g_cfg.lb_mode = 1;
+            g_cfg.lb_nbest_readers = 1;
+            reader_stats_reset(reader_index);
+            unsigned char cw[16] = {0};
+            S_READER_RESULT first, second;
+            req.caid = 0x0B00; req.sid = 0x0064; req.provid = 0;
+            req.ecm = ecm; req.ecm_len = sizeof(ecm); req.cw = cw;
+            int32_t rc1 = reader_dispatch_ecm(&req, &first);
+            S_READER_STATS_SNAPSHOT before, after;
+            reader_stats_snapshot(reader_index, &before);
+            int32_t rc2 = reader_dispatch_ecm(&req, &second);
+            reader_stats_snapshot(reader_index, &after);
+            printf("negative-cache rc1=%d rc2=%d nok_before=%lld nok_after=%lld\n",
+                   rc1, rc2, (long long)before.cw_nok, (long long)after.cw_nok);
+            if (rc1 == EMU_OK || rc2 == EMU_OK || before.cw_nok < 1 ||
+                after.cw_nok != before.cw_nok || after.samples != before.samples) {
+                fprintf(stderr,"FAIL: exact repeated NOT_FOUND was not suppressed\n");
+                overall = 1;
+            }
         }
     }
     else {

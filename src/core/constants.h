@@ -32,7 +32,8 @@
 #endif
 
 #define CW_LEN               16
-#define NC_MSG_MAX           1024
+#define TCMG_MAX_ECM_SIZE    1024
+#define NC_MSG_MAX           2048
 #define NC_HDR_LEN           8
 #define LOG_RING_MAX         1000
 #define MAX_CONNS            256

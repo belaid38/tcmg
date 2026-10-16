@@ -19,6 +19,7 @@ int32_t net_recv_all(int fd, void *buf, int32_t len)
         if (n < 0) {
 #ifdef TCMG_OS_WINDOWS
             int e = WSAGetLastError();
+            if (e == WSAEINTR) continue;
             if (e == WSAETIMEDOUT || e == WSAEWOULDBLOCK)
                 return total == 0 ? NET_RECV_TIMEOUT : -1;
 #else
@@ -271,13 +272,19 @@ int32_t nc_recv(S_CLIENT *cl, uint8_t *data,
 {
     uint8_t lenbuf[2], key16[16];
     uint16_t proto;
-    uint8_t *buf = cl->protocol.wire.newcamd.recv_buf;
+    uint8_t *buf;
     int32_t wire_len, total, dec_len;
     int off;
     uint32_t rlen;
 
     if (!cl || !data || !sid || !mid || !pid || !caid_hdr) return -1;
-    if (net_recv_all(cl->session.fd, lenbuf, 2) != 2) return -1;
+    buf = cl->protocol.wire.newcamd.recv_buf;
+    /* A timeout before consuming any frame-header byte is recoverable and
+     * lets the caller emit a protocol keepalive. Once framing has started,
+     * a short header/body is fatal because the stream cannot be resynchronized. */
+    int32_t header_read = net_recv_all(cl->session.fd, lenbuf, 2);
+    if (header_read == NET_RECV_TIMEOUT) return NET_RECV_TIMEOUT;
+    if (header_read != 2) return -1;
     wire_len = (int32_t)be16(lenbuf);
     if (wire_len < 16 || wire_len > NC_MSG_MAX - 2) return -1;
 

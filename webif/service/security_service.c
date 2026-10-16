@@ -14,6 +14,14 @@
 #include <stdatomic.h>
 #include <string.h>
 #include <time.h>
+
+static bool webif_bind_is_loopback(const char *bindaddr)
+{
+    struct in_addr addr;
+    if (!bindaddr || inet_pton(AF_INET, bindaddr, &addr) != 1) return false;
+    return (ntohl(addr.s_addr) & 0xFF000000u) == 0x7F000000u;
+}
+
 S_WEBIF_SERVER_STATS webif_server_stats(void)
 {
     S_WEBIF_SERVER_STATS s;
@@ -124,7 +132,10 @@ bool webif_auth_enabled(void)
 {
     bool enabled;
     pthread_rwlock_rdlock(&g_cfg.acc_lock);
-    enabled = g_cfg.webif_user[0] || g_cfg.webif_pass[0];
+    /* With no credentials, authentication may be omitted only when the HTTP
+     * listener is explicitly bound to loopback. Empty bind means INADDR_ANY. */
+    enabled = g_cfg.webif_user[0] || g_cfg.webif_pass[0] ||
+              !webif_bind_is_loopback(g_cfg.webif_bindaddr);
     pthread_rwlock_unlock(&g_cfg.acc_lock);
     return enabled;
 }
@@ -135,6 +146,9 @@ bool webif_auth_basic_valid(const char *header)
 
     S_WEBIF_CONFIG_VIEW c;
     if (!webif_config_snapshot(&c)) return false;
+    /* Never accept an empty Basic credential pair. Local loopback with no
+     * configured credentials is handled by webif_auth_enabled() instead. */
+    if (!c.webif_user[0] && !c.webif_pass[0]) return false;
 
     const char *p = header;
     while (*p == ' ' || *p == '\t') p++;
@@ -162,7 +176,12 @@ bool webif_credentials_valid(const char *user, const char *pass)
 {
     S_WEBIF_CONFIG_VIEW c;
     if (!webif_config_snapshot(&c)) return false;
-    if (!c.webif_user[0] && !c.webif_pass[0]) return true;
+    if (!c.webif_user[0] && !c.webif_pass[0]) {
+        /* Loopback-only mode may omit authentication, but it must not make
+         * arbitrary non-empty credentials appear valid to other callers. */
+        return webif_bind_is_loopback(c.webif_bindaddr) &&
+               (!user || !user[0]) && (!pass || !pass[0]);
+    }
     if (!user || !pass) return false;
     return ct_streq(user, c.webif_user) && ct_streq(pass, c.webif_pass);
 }

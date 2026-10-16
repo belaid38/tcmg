@@ -6,6 +6,7 @@
 #include "../../src/core/client_types.h"
 #include "../../src/core/config_state.h"
 #include "../../src/account/account.h"
+#include "../../src/stats/account_stats.h"
 #include "../../src/core/utils.h"
 #include <pthread.h>
 #include <string.h>
@@ -44,6 +45,11 @@ int webif_client_snapshot_all(S_WEBIF_CLIENT_VIEW *out, size_t cap)
         S_ACCOUNT *account = account_session_acquire(cl);
         if (!account) continue;
         n = snapshot_client(out, n, cl, account);
+        {
+            S_ACCOUNT_STATS_SNAPSHOT st;
+            account_stats_snapshot(account, &st);
+            out[n - 1].cw_last_60s = st.cw_last_60s;
+        }
         account_release(account);
     }
     pthread_mutex_unlock(&g_clients_mtx);

@@ -18,6 +18,7 @@ const S_DBLEVEL_NAME g_dblevel_names[MAX_DEBUG_LEVELS] = {
 	{ D_CONN,    "conn"    },
 	{ D_READER,  "reader"  },
 	{ D_PROTOCOL,"protocol" },
+	{ D_DVBAPI,  "dvbapi"  },
 };
 
 #define LOG_FILE_MAX_BYTES  (10u * 1024u * 1024u)
@@ -84,6 +85,8 @@ static pthread_cond_t   s_wq_cond    = PTHREAD_COND_INITIALIZER;
 static pthread_cond_t   s_wq_empty   = PTHREAD_COND_INITIALIZER;
 static pthread_t        s_wq_tid;
 static _Atomic int8_t   s_wq_running = 0;
+static _Atomic int8_t   s_wq_started = 0;
+static _Atomic int8_t   s_wq_queueing = 0;
 
 typedef struct {
 	char   *line;
@@ -449,12 +452,25 @@ void log_init(void)
 	s_dup_count = 0;
 	s_dup_started_ms = 0;
 	pthread_mutex_unlock(&s_dedupe_mtx);
-	atomic_store(&s_wq_running, 1);
-	pthread_create(&s_wq_tid, NULL, writer_thread, NULL);
+	if (atomic_load_explicit(&s_wq_started, memory_order_acquire)) return;
+	atomic_store_explicit(&s_wq_queueing, 0, memory_order_release);
+	atomic_store_explicit(&s_wq_running, 1, memory_order_release);
+	int rc = pthread_create(&s_wq_tid, NULL, writer_thread, NULL);
+	if (rc != 0) {
+		atomic_store_explicit(&s_wq_running, 0, memory_order_release);
+		atomic_store_explicit(&s_wq_queueing, 0, memory_order_release);
+		fprintf(stderr, "[TCMG] log writer thread creation failed rc=%d (%s); using synchronous logging\n",
+		        rc, strerror(rc));
+		return;
+	}
+	atomic_store_explicit(&s_wq_started, 1, memory_order_release);
+	atomic_store_explicit(&s_wq_queueing, 1, memory_order_release);
 }
 
 void log_flush(void)
 {
+	/* With no writer, emit_line_ex() writes synchronously and the queue is empty. */
+	if (!atomic_load_explicit(&s_wq_started, memory_order_acquire)) return;
 	pthread_mutex_lock(&s_wq_mtx);
 	while (atomic_load_explicit(&s_wq_head, memory_order_relaxed) !=
 	       atomic_load_explicit(&s_wq_tail, memory_order_relaxed))
@@ -466,11 +482,18 @@ void log_shutdown(void)
 {
 	tcmg_log("%s", ">> " TCMG_BANNER " << shutting down");
 	log_flush();
-	atomic_store_explicit(&s_wq_running, 0, memory_order_release);
-	pthread_mutex_lock(&s_wq_mtx);
-	pthread_cond_signal(&s_wq_cond);
-	pthread_mutex_unlock(&s_wq_mtx);
-	pthread_join(s_wq_tid, NULL);
+	if (atomic_load_explicit(&s_wq_started, memory_order_acquire)) {
+		/* Switch producers to synchronous mode before the writer begins exiting. */
+		atomic_store_explicit(&s_wq_queueing, 0, memory_order_release);
+		atomic_store_explicit(&s_wq_running, 0, memory_order_release);
+		pthread_mutex_lock(&s_wq_mtx);
+		pthread_cond_signal(&s_wq_cond);
+		pthread_mutex_unlock(&s_wq_mtx);
+		int rc = pthread_join(s_wq_tid, NULL);
+		if (rc != 0)
+			fprintf(stderr, "[TCMG] log writer thread join failed rc=%d (%s)\n", rc, strerror(rc));
+		atomic_store_explicit(&s_wq_started, 0, memory_order_release);
+	}
 	if (s_log_fp) { fclose(s_log_fp); s_log_fp = NULL; }
 	if (s_usr_fp) { fclose(s_usr_fp); s_usr_fp = NULL; }
 	pthread_mutex_lock(&s_ring_mtx);
@@ -568,7 +591,7 @@ static void emit_line_ex(const char *mod, const char *body, int dedupe, const ch
 		if (summary_count > 0) {
 			char dup[LOG_LINE_MAX];
 			snprintf(dup, sizeof(dup), "%s %08X %c            -- last line repeated %d time(s) --", ts, tid, t_log_type, summary_count);
-			if (atomic_load_explicit(&s_wq_running, memory_order_acquire))
+			if (atomic_load_explicit(&s_wq_queueing, memory_order_acquire))
 				wq_push(dup, log_usr, NULL);
 			else {
 				print_colored(stdout, dup);
@@ -581,7 +604,7 @@ static void emit_line_ex(const char *mod, const char *body, int dedupe, const ch
 	if (summary_count > 0) {
 		char dup[LOG_LINE_MAX];
 		snprintf(dup, sizeof(dup), "%s %08X %c            -- last line repeated %d time(s) --", ts, tid, t_log_type, summary_count);
-		if (atomic_load_explicit(&s_wq_running, memory_order_acquire))
+		if (atomic_load_explicit(&s_wq_queueing, memory_order_acquire))
 			wq_push(dup, log_usr, NULL);
 		else {
 			print_colored(stdout, dup);
@@ -589,7 +612,7 @@ static void emit_line_ex(const char *mod, const char *body, int dedupe, const ch
 			ring_push(dup, log_usr);
 		}
 	}
-	if (atomic_load_explicit(&s_wq_running, memory_order_acquire))
+	if (atomic_load_explicit(&s_wq_queueing, memory_order_acquire))
 		wq_push(line, log_usr, usr_line);
 	else {
 		print_colored(stdout, line);

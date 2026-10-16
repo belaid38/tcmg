@@ -44,6 +44,7 @@ void send_api_status(int fd, const char *qs)
         "\"newcamd_port\":%d,"
         "\"cccam_port\":%d,"
         "\"cs378x_port\":%d,"
+        "\"camd35_port\":%d,"
         "\"active_connections\":%d,"
         "\"accounts\":%d,"
         "\"banned_ips\":%d,"
@@ -58,7 +59,7 @@ void send_api_status(int fd, const char *qs)
         "\"clients\":[",
         TCMG_VERSION, TCMG_BUILD_TIME,
         (long)st.uptime_s, st.uptime_str,
-        cfg.newcamd_port, cfg.cccam_port, cfg.cs378x_port, st.active_conns,
+        cfg.newcamd_port, cfg.cccam_port, cfg.cs378x_port, cfg.camd35_port, st.active_conns,
         st.naccounts, st.nbans,
         (long long)st.cw_found, (long long)st.cw_not, (unsigned long long)st.ecm_total,
         st.hit_rate, g_dblevel,
@@ -79,9 +80,9 @@ void send_api_status(int fd, const char *qs)
         pos = buf_printf(&buf, &bsz, pos,
             "%s{\"user\":\"%s\",\"ip\":\"%s\",\"proto\":\"%s\","
             "\"caid\":\"%04X\",\"sid\":\"%04X\",\"channel\":\"%s\","
-            "\"connected\":\"%s\",\"idle\":\"%s\",\"thread_id\":%u}",
+            "\"connected\":\"%s\",\"idle\":\"%s\",\"last_60s\":%lld,\"thread_id\":%u}",
             first ? "" : ",", esc_user, esc_ip, esc_proto,
-            cl->caid, cl->sid, esc_chan, conn_str, idle_str, cl->thread_id);
+            cl->caid, cl->sid, esc_chan, conn_str, idle_str, (long long)cl->cw_last_60s, cl->thread_id);
         first = false;
     }
 

@@ -79,3 +79,20 @@ bool cfg_runtime_network_snapshot(S_CONFIG_NETWORK_VIEW *out)
     pthread_rwlock_unlock(&g_cfg.acc_lock);
     return true;
 }
+
+bool cfg_runtime_dvbapi_snapshot(S_CONFIG_DVBAPI_VIEW *out)
+{
+    if (!out) return false;
+    pthread_rwlock_rdlock(&g_cfg.acc_lock);
+    out->enabled = g_cfg.dvbapi_enabled;
+    tcmg_strlcpy(out->user, g_cfg.dvbapi_user, sizeof(out->user));
+    tcmg_strlcpy(out->socket, g_cfg.dvbapi_socket, sizeof(out->socket));
+    tcmg_strlcpy(out->boxtype, g_cfg.dvbapi_boxtype, sizeof(out->boxtype));
+    out->delay_ms = g_cfg.dvbapi_delay_ms;
+    out->max_services = g_cfg.dvbapi_max_services;
+    out->pmt_mode = g_cfg.dvbapi_pmt_mode;
+    out->listen_port = g_cfg.dvbapi_listen_port;
+    tcmg_strlcpy(out->serverip, g_cfg.dvbapi_serverip, sizeof(out->serverip));
+    pthread_rwlock_unlock(&g_cfg.acc_lock);
+    return true;
+}

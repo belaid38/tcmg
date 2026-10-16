@@ -514,8 +514,10 @@ int pcsc_start(void)
 {
 #ifdef TCMG_PCSC
     if (atomic_exchange(&s_running, 1)) return 0;
-    if (pthread_create(&s_tid, NULL, pcsc_thread, NULL) != 0) {
+    int trc = pthread_create(&s_tid, NULL, pcsc_thread, NULL);
+    if (trc != 0) {
         atomic_store(&s_running, 0);
+        tcmg_log("PCSC worker thread failed rc=%d (%s)", trc, strerror(trc));
         return -1;
     }
     tcmg_log("support enabled");

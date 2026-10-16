@@ -9,12 +9,33 @@ static void *proto_server_accept_thread(void *arg)
 {
     S_PROTO_SERVER *server = (S_PROTO_SERVER *)arg;
     pthread_attr_t attr;
+    const pthread_attr_t *attrp = NULL;
+    int attr_ready = 0;
+    int detached_attr = 0;
 
     if (!server) return NULL;
 
-    pthread_attr_init(&attr);
-    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-    pthread_attr_setstacksize(&attr, 256 * 1024);
+    int arc = pthread_attr_init(&attr);
+    if (arc == 0) {
+        attr_ready = 1;
+        arc = pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+        if (arc == 0) {
+            attrp = &attr;
+            detached_attr = 1;
+            int src = pthread_attr_setstacksize(&attr, 256 * 1024);
+            if (src != 0)
+                tcmg_log_dbg(D_CONN, "[%s] stack size request failed rc=%d (%s); using default stack",
+                             server->name, src, strerror(src));
+        } else {
+            tcmg_log("[%s] detached thread attribute failed rc=%d (%s); using per-thread detach",
+                     server->name, arc, strerror(arc));
+            pthread_attr_destroy(&attr);
+            attr_ready = 0;
+        }
+    } else {
+        tcmg_log("[%s] thread attribute initialization failed rc=%d (%s); using per-thread detach",
+                 server->name, arc, strerror(arc));
+    }
     log_set_type(LOG_TYPE_CLIENT);
 
     while (atomic_load(&server->running) && g_running)
@@ -27,6 +48,7 @@ static void *proto_server_accept_thread(void *arg)
         FD_SET(listen_fd, &rfds);
         struct timeval tv = {0, 200000};
         int rc = select(listen_fd + 1, &rfds, NULL, NULL, &tv);
+        if (!atomic_load(&server->running) || !g_running) break;
         if (rc <= 0) continue;
 
         struct sockaddr_in ca;
@@ -69,18 +91,29 @@ static void *proto_server_accept_thread(void *arg)
                      args->ip, server->name, cfd, active + 1);
 
         pthread_t tid;
-        int prc = pthread_create(&tid, &attr, server->client_handler, args);
+        int prc = pthread_create(&tid, attrp, server->client_handler, args);
         if (prc != 0)
         {
-            tcmg_log("[%s] pthread_create failed rc=%d errno=%d (%s)",
-                     server->name, prc, errno, strerror(errno));
+            tcmg_log("[%s] pthread_create failed rc=%d (%s)",
+                     server->name, prc, strerror(prc));
             atomic_fetch_sub(&g_active_conns, 1);
             close(cfd);
             free(args);
+        } else if (!detached_attr) {
+            /* pthread_attr_init/setdetachstate can fail; still detach the worker. */
+            int drc = pthread_detach(tid);
+            if (drc != 0) {
+                tcmg_log("[%s] pthread_detach failed rc=%d (%s); joining worker to avoid leaking a joinable thread",
+                         server->name, drc, strerror(drc));
+                int jrc = pthread_join(tid, NULL);
+                if (jrc != 0)
+                    tcmg_log("[%s] fallback pthread_join failed rc=%d (%s)",
+                             server->name, jrc, strerror(jrc));
+            }
         }
     }
 
-    pthread_attr_destroy(&attr);
+    if (attr_ready) pthread_attr_destroy(&attr);
     tcmg_log_dbg(D_CONN, "[%s] accept thread exiting", server->name);
     return NULL;
 }
@@ -152,12 +185,13 @@ int32_t proto_server_start(S_PROTO_SERVER *server,
     }
 
     atomic_store(&server->running, 1);
-    if (pthread_create(&server->thread, NULL, proto_server_accept_thread, server) != 0)
+    int trc = pthread_create(&server->thread, NULL, proto_server_accept_thread, server);
+    if (trc != 0)
     {
         atomic_store(&server->running, 0);
         close(fd);
         server->fd = -1;
-        tcmg_log("[%s] failed to start listener errno=%d (%s)", name, errno, strerror(errno));
+        tcmg_log("[%s] failed to start listener rc=%d (%s)", name, trc, strerror(trc));
         return -1;
     }
 
@@ -169,12 +203,14 @@ void proto_server_stop(S_PROTO_SERVER *server)
 {
     if (!server || !atomic_load(&server->running)) return;
 
+    /* Do not close/rewrite fd while the accept thread may still read it.
+     * select() has a bounded timeout, so it will observe running=0 quickly. */
     atomic_store(&server->running, 0);
+    pthread_join(server->thread, NULL);
     if (server->fd >= 0)
     {
         close(server->fd);
         server->fd = -1;
     }
-    pthread_join(server->thread, NULL);
     tcmg_log("[%s] stopped", server->name ? server->name : "server");
 }

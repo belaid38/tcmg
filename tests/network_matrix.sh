@@ -4,6 +4,7 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 BUILD_ROOT="${TCMG_NETWORK_BUILD_DIR:-$ROOT/build}"
 BIN="$BUILD_ROOT/tcmg"
 SMOKE="$BUILD_ROOT/test_reader_smoke"
+UDP_SMOKE="$BUILD_ROOT/test_camd35_udp_smoke"
 TMP=${TMPDIR:-/tmp}/tcmg-network-matrix-$$
 trap 'pkill -TERM -P $$ 2>/dev/null || true; rm -rf "$TMP"' EXIT INT TERM
 mkdir -p "$TMP"
@@ -15,9 +16,10 @@ make_server_conf() {
     port="$1"; mode="$2"
     d="$TMP/server-$mode"; mkdir -p "$d"
     case "$mode" in
-      cccam) nport=0; cport="$port"; csport=0;;
-      newcamd|mgcamd) nport="$port"; cport=0; csport=0;;
-      cs378x) nport=0; cport=0; csport="$port";;
+      cccam) nport=0; cport="$port"; csport=0; dport=0;;
+      newcamd|mgcamd) nport="$port"; cport=0; csport=0; dport=0;;
+      cs378x) nport=0; cport=0; csport="$port"; dport=0;;
+      camd35) nport=0; cport=0; csport=0; dport="$port";;
       *) echo "bad mode" >&2; exit 2;;
     esac
     cat > "$d/tcmg.conf" <<CFG
@@ -46,6 +48,9 @@ port = $cport
 bindaddr =
 [cs378x]
 port = $csport
+bindaddr =
+[camd35]
+port = $dport
 bindaddr =
 [failban]
 enabled = 0
@@ -151,19 +156,35 @@ CFG
     printf '%s\n' "$d"
 }
 
-for mode in cccam newcamd mgcamd cs378x; do
+for mode in cccam newcamd mgcamd cs378x camd35; do
   case "$mode" in
     cccam) port=19150;;
     newcamd) port=19151;;
     mgcamd) port=19152;;
     cs378x) port=19153;;
+    camd35) port=19154;;
   esac
   sd=$(make_server_conf "$port" "$mode")
   cd="$sd" >/dev/null
   "$BIN" -c "$sd" >"$sd/server.log" 2>&1 & spid=$!
   sleep 0.25
   if ! kill -0 "$spid" 2>/dev/null; then echo "[$mode] server failed" >&2; cat "$sd/server.log" >&2; exit 10; fi
+  if [ "$mode" = camd35 ]; then
+      if ! "$UDP_SMOKE" 127.0.0.1 "$port" serveruser0123456789 >"$sd/udp-smoke.log" 2>&1; then
+          echo "[camd35] FAIL" >&2; cat "$sd/udp-smoke.log" >&2; cat "$sd/server.log" >&2; kill "$spid" 2>/dev/null || true; exit 14
+      fi
+      cat "$sd/udp-smoke.log"
+      kill "$spid" 2>/dev/null || true
+      wait "$spid" 2>/dev/null || true
+      echo "[camd35] PASS"
+      continue
+  fi
   cdst=$(make_client_conf "$mode" "$port")
+  if ! "$SMOKE" "$cdst/tcmg.conf" expect-negative-cache >"$cdst/lb-smoke.log" 2>&1; then
+      echo "[$mode] FAIL: exact ECM negative-cache test" >&2
+      cat "$cdst/lb-smoke.log" >&2; kill "$spid" 2>/dev/null || true; exit 15
+  fi
+  grep -q 'nok_after=' "$cdst/lb-smoke.log"
   if ! "$SMOKE" "$cdst/tcmg.conf" >"$cdst/smoke.log" 2>&1; then
       echo "[$mode] FAIL" >&2; cat "$cdst/smoke.log" >&2; cat "$sd/server.log" >&2; kill "$spid" 2>/dev/null || true; exit 11
   fi

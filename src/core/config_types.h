@@ -28,6 +28,9 @@ typedef struct {
     int32_t  cs378x_port;
     char     cs378x_bindaddr[MAXIPLEN];
 
+    int32_t  camd35_port;
+    char     camd35_bindaddr[MAXIPLEN];
+
     int32_t  newcamd_port;
     char     newcamd_bindaddr[MAXIPLEN];
     uint8_t  newcamd_key[14];
@@ -53,6 +56,18 @@ typedef struct {
     char      seller_type[16];
     char      seller_host[CFGKEY_LEN];
     int32_t   seller_port;
+
+    bool      dvbapi_enabled;
+    char      dvbapi_user[CFGKEY_LEN];
+    char      dvbapi_socket[CFGPATH_LEN];
+    char      dvbapi_boxtype[16];
+    int32_t   dvbapi_delay_ms;
+    int32_t   dvbapi_max_services;
+    int32_t   dvbapi_pmt_mode; /* 0=local listener, 6=connect to Enigma2 CA_PMT socket */
+    int32_t   dvbapi_listen_port; /* OSCam-compatible DVBAPI TCP listener; 0 disables */
+    char      dvbapi_serverip[MAXIPLEN];
+    int32_t   lb_mode;            /* OSCam-style: 0=parallel, 1=fastest, 2=oldest, 3=lowest usage */
+    int32_t   lb_nbest_readers;   /* parallel reader candidates per load-balancer round */
 } S_CONFIG;
 
 #endif

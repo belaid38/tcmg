@@ -23,6 +23,8 @@
 #define CS378X_MAX_CRYPT (CS378X_MAX_PLAIN + 15)
 
 uint32_t cs378x_crc32(const uint8_t *data, size_t len);
+int cs378x_payload_info(const uint8_t *plain, size_t available,
+                        size_t *data_len, size_t *plain_len);
 void cs378x_user_crc(const char *user, uint8_t out[4]);
 void cs378x_password_key(const char *password, uint8_t out[16]);
 

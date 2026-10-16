@@ -1,11 +1,47 @@
 #define MODULE_LOG_PREFIX "conf"
 #include "config_internal.h"
 #include "../reader/protocol.h"
+#include "../reader/rules.h"
 #include <ctype.h>
 
-void cfg_path_sibling(char *out,size_t outsz,const char *global,const char *name)
+void cfg_path_sibling(char *out, size_t outsz, const char *global, const char *name)
 {
-    char dir[CFGPATH_LEN];tcmg_strlcpy(dir,global,sizeof(dir));char*p1=strrchr(dir,'/'),*p2=strrchr(dir,'\\'),*p=p1>p2?p1:p2;if(p)*p='\0';else tcmg_strlcpy(dir,".",sizeof(dir));tcmg_build_path(out,outsz,dir,name);
+    char dir[CFGPATH_LEN];
+    const char *slash;
+    const char *backslash;
+    const char *last = NULL;
+    size_t dir_len;
+
+    if (!out || outsz == 0) return;
+    out[0] = '\0';
+    if (!global || !global[0] || !name || !name[0]) return;
+
+    slash = strrchr(global, '/');
+    backslash = strrchr(global, '\\');
+    if (slash) last = slash;
+    if (backslash && (!last || backslash > last)) last = backslash;
+
+    if (!last) {
+        tcmg_strlcpy(dir, ".", sizeof(dir));
+    } else {
+        dir_len = (size_t)(last - global);
+        if (dir_len >= sizeof(dir)) return;
+        memcpy(dir, global, dir_len);
+        dir[dir_len] = '\0';
+    }
+
+    tcmg_build_path(out, outsz, dir, name);
+    size_t out_len = strlen(out);
+    size_t name_len = strlen(name);
+    if (out_len < name_len || strcmp(out + out_len - name_len, name) != 0)
+        out[0] = '\0';
+}
+
+static bool webif_bind_is_loopback(const char *bindaddr)
+{
+    struct in_addr addr;
+    if (!bindaddr || inet_pton(AF_INET, bindaddr, &addr) != 1) return false;
+    return (ntohl(addr.s_addr) & 0xFF000000u) == 0x7F000000u;
 }
 
 bool cfg_validate(S_CONFIG *c, char *err, size_t esz)
@@ -15,6 +51,14 @@ bool cfg_validate(S_CONFIG *c, char *err, size_t esz)
 
     if (!c) {
         snprintf(err, esz, "null configuration");
+        return false;
+    }
+
+    if (c->webif_enabled && c->webif_port > 0 &&
+        !webif_bind_is_loopback(c->webif_bindaddr) &&
+        (!c->webif_user[0] || !c->webif_pass[0])) {
+        snprintf(err, esz,
+                 "WebIF on a non-loopback address requires both username and password");
         return false;
     }
 
@@ -96,7 +140,6 @@ bool cfg_validate(S_CONFIG *c, char *err, size_t esz)
         }
         else if (!strcasecmp(protocol->name, "internal")) {
             if (r->enabled && !r->device[0]) {
-                /* Empty internal device means automatic backend detection. */
             }
             if (r->fast_reset < 0 || r->fast_reset > 86400 ||
                 r->fast_reset_idle < 0 || r->fast_reset_idle > 86400) {
@@ -146,7 +189,17 @@ bool cfg_validate(S_CONFIG *c, char *err, size_t esz)
                         snprintf(err, esz, "reader[%d] '%s': manual old ECM is missing or too long", i, r->label);
                         return false;
                     }
-                    if (r->ecm_whitelist > 0 && (int32_t)(old_len / 2u) != r->ecm_whitelist) {
+                    uint16_t old_caid = r->ncaids > 0 ? r->caids[0] :
+                                        (r->nidents > 0 ? r->idents[0].caid : 0);
+                    uint32_t old_provid = 0;
+                    for (int j = 0; j < r->nidents; j++) {
+                        if (r->idents[j].caid == old_caid) {
+                            old_provid = r->idents[j].provid;
+                            break;
+                        }
+                    }
+                    if (!reader_ecm_whitelist_allows(r, old_caid, old_provid,
+                                                     (int32_t)(old_len / 2u))) {
                         snprintf(err, esz, "reader[%d] '%s': manual old ECM length does not match ecmwhitelist", i, r->label);
                         return false;
                     }
@@ -225,6 +278,21 @@ bool cfg_listener_settings_changed(const S_CONFIG *old_cfg,
         strcmp(old_cfg->cs378x_bindaddr, new_cfg->cs378x_bindaddr) != 0) {
         snprintf(err, errsz,
                  "cs378x listener changed; restart TCMG to apply port/bind changes");
+        return true;
+    }
+    if (old_cfg->camd35_port != new_cfg->camd35_port ||
+        strcmp(old_cfg->camd35_bindaddr, new_cfg->camd35_bindaddr) != 0) {
+        snprintf(err, errsz,
+                 "camd35 UDP listener changed; restart TCMG to apply port/bind changes");
+        return true;
+    }
+    if (old_cfg->dvbapi_enabled != new_cfg->dvbapi_enabled ||
+        strcmp(old_cfg->dvbapi_socket, new_cfg->dvbapi_socket) != 0 ||
+        strcmp(old_cfg->dvbapi_user, new_cfg->dvbapi_user) != 0 ||
+        strcmp(old_cfg->dvbapi_boxtype, new_cfg->dvbapi_boxtype) != 0 ||
+        old_cfg->dvbapi_delay_ms != new_cfg->dvbapi_delay_ms ||
+        old_cfg->dvbapi_max_services != new_cfg->dvbapi_max_services) {
+        snprintf(err, errsz, "dvbapi settings changed; restart TCMG to apply them");
         return true;
     }
     return false;

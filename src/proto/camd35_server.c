@@ -54,9 +54,15 @@ static int cs378x_handle_ecm(S_CLIENT *cl, const uint8_t *plain, size_t plain_le
              ((uint32_t)plain[14] << 8) | plain[15];
     ecm_len = (((size_t)plain[21] & 0x0F) << 8) | plain[22];
     ecm_len += 3;
-    if (ecm_len == 0 || ecm_len > 255 || plain_len != CS378X_HEADER_LEN + ecm_len) return -1;
+    if (ecm_len == 0 || ecm_len > TCMG_MAX_ECM_SIZE || plain_len != CS378X_HEADER_LEN + ecm_len) return -1;
+    int32_t normalized_len = (int32_t)ecm_len;
+    if (!ecm_prepare_input(caid, &provid, plain + CS378X_HEADER_LEN, &normalized_len)) {
+        cs378x_send_error(cl);
+        return 1;
+    }
+    ecm_len = (size_t)normalized_len;
 
-    access = ecm_access(cl, caid, sid, provid, false, true, false);
+    access = ecm_access(cl, caid, sid, provid);
     if (access != ECM_ACCESS_OK) {
         if (access == ECM_ACCESS_CAID_DENIED)
             tcmg_log_dbg(D_ECM, "%s ECM denied: CAID %04X not allowed user='%s'",

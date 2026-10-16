@@ -48,7 +48,7 @@ static size_t round16(size_t n)
     return (n + 15U) & ~((size_t)15U);
 }
 
-static int cs378x_data_len(const uint8_t *p, size_t n, size_t *data_len, size_t *plain_len)
+int cs378x_payload_info(const uint8_t *p, size_t n, size_t *data_len, size_t *plain_len)
 {
     if (!p || !data_len || !plain_len || n < CS378X_HEADER_LEN) return -1;
     uint8_t cmd = p[0];
@@ -83,7 +83,7 @@ int cs378x_build_frame(const uint8_t ucrc[4], const uint8_t key[16],
     if (!ucrc || !key || !plain || !out || !out_len) return -1;
     if (plain_len < CS378X_HEADER_LEN || plain_len > CS378X_MAX_PLAIN) return -1;
     size_t data_len, expected_plain;
-    if (cs378x_data_len(plain, plain_len, &data_len, &expected_plain) < 0) return -1;
+    if (cs378x_payload_info(plain, plain_len, &data_len, &expected_plain) < 0) return -1;
     if (expected_plain != plain_len) return -1;
     if (data_len > plain_len - CS378X_HEADER_LEN) return -1;
 
@@ -123,7 +123,7 @@ int cs378x_recv_payload(int fd, const uint8_t key[16],
 
     aes128_ecb_decrypt(key, first, sizeof(first));
     size_t data_len, expected_plain;
-    if (cs378x_data_len(first, sizeof(first), &data_len, &expected_plain) < 0) return -1;
+    if (cs378x_payload_info(first, sizeof(first), &data_len, &expected_plain) < 0) return -1;
     size_t crypt_len = round16(expected_plain);
     if (crypt_len < sizeof(first) || crypt_len > CS378X_MAX_CRYPT || crypt_len > plain_cap) return -1;
 
@@ -135,7 +135,7 @@ int cs378x_recv_payload(int fd, const uint8_t key[16],
         aes128_ecb_decrypt(key, plain + sizeof(first), crypt_len - sizeof(first));
     }
 
-    if (cs378x_data_len(plain, crypt_len, &data_len, &expected_plain) < 0) return -1;
+    if (cs378x_payload_info(plain, crypt_len, &data_len, &expected_plain) < 0) return -1;
     if (expected_plain > crypt_len || round16(expected_plain) != crypt_len) return -1;
 
     uint32_t want = ((uint32_t)plain[4] << 24) | ((uint32_t)plain[5] << 16) |

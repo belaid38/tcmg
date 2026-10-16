@@ -9,6 +9,13 @@
 #define TCMG_OLD_ECM_SOURCE_AUTO 0
 #define TCMG_OLD_ECM_SOURCE_MANUAL 1
 #define TCMG_OLD_ECM_HEX_LEN 498
+#define TCMG_MAX_ECM_WHITELIST_ENTRIES 128
+
+typedef struct {
+    uint16_t len;
+    uint16_t caid;
+    uint32_t provid;
+} S_ECM_WHITELIST_ENTRY;
 
 typedef struct {
     char     label[READER_LABEL_LEN];
@@ -26,10 +33,14 @@ typedef struct {
     uint16_t sid_whitelist[MAX_SID_WHITELIST];
     int32_t  nsid_whitelist;
     int32_t  ecm_whitelist;
+    char     ecm_whitelist_spec[CFGVAL_LEN];
+    S_ECM_WHITELIST_ENTRY ecm_whitelist_entries[TCMG_MAX_ECM_WHITELIST_ENTRIES];
+    int32_t  ecm_whitelist_count;
     int32_t  groups[MAX_GROUPS_PER_READER];
     int32_t  ngroups;
     S_ECMKEY keys[MAX_ECMKEYS_PER_ACC];
     int32_t  nkeys;
+    int32_t  deprecated;
     int32_t  fast_reset;
     int32_t  fast_reset_idle;
     int32_t  poll_ms;

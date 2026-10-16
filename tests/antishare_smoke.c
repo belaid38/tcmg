@@ -27,17 +27,12 @@ int main(void)
     assert(a.as_last_cw_sid == 100);
     assert(a.as_last_cw[0] == 0x11);
 
-    /* A second client on the same CAID/SID is still one active channel.
-     * This models cache/shared delivery without bypassing anti-share. */
     assert(antishare_check_channel(&a, 11, 0x0B00, 100, &delay) == AS_CHECK_OK);
     assert(a.as_channel_count == 1);
     assert(antishare_check_channel(&a, 12, 0x0B00, 200, &delay) == AS_CHECK_CHANNEL_LIMIT);
 
-    /* Do not allow one client to switch away from a SID that another client
-     * is still using when max_sids has already been reached. */
     assert(antishare_check_channel(&a, 10, 0x0B00, 200, &delay) == AS_CHECK_CHANNEL_LIMIT);
 
-    /* Once the other client releases SID 100, client 10 may switch to SID 200. */
     antishare_release_client(&a, 11);
     assert(a.as_channel_count == 1);
     assert(antishare_check_channel(&a, 10, 0x0B00, 200, &delay) == AS_CHECK_OK);
@@ -48,8 +43,6 @@ int main(void)
     antishare_record_channel_success(&a, 10, 0x0B00, 200, cw);
     assert(a.as_channel_count == 1);
 
-    /* Increasing the limit allows a second distinct SID. Repeated cache/shared
-     * requests on the same SID still remain one active channel. */
     a.as_max_sids = 2;
     assert(antishare_check_channel(&a, 11, 0x0B00, 200, &delay) == AS_CHECK_OK);
     assert(a.as_channel_count == 1);
@@ -58,8 +51,6 @@ int main(void)
     assert(antishare_check_channel(&a, 12, 0x0B00, 100, &delay) == AS_CHECK_OK);
     assert(a.as_channel_count == 2);
 
-    /* One quick switch alone is tolerated. Repeated recent channels or a
-     * three-channel burst may arm the soft CW delay without blocking access. */
     a.as_max_sids = 32;
     a.as_channel_timeout_s = 15;
     memset(a.as_recent_channels, 0, sizeof(a.as_recent_channels));
@@ -85,8 +76,6 @@ int main(void)
     assert(antishare_begin_ecm(&a) == AS_CHECK_OK);
     antishare_end_ecm(&a, false);
     assert(a.as_ecm_points == 2);
-    /* ECM rate points remain separate from active-channel accounting.
-     * cache/shared are already covered by antishare_check_channel(). */
     assert(antishare_begin_ecm(&a) == AS_CHECK_OK);
     antishare_end_ecm(&a, true);
     assert(a.as_ecm_points == 3);

@@ -1,5 +1,6 @@
 #define MODULE_LOG_PREFIX "ecm"
 #include "pipeline.h"
+#include "policy.h"
 #include "account/account.h"
 #include "request.h"
 #include "core/config_state.h"
@@ -29,7 +30,12 @@ int32_t ecm_process(S_CLIENT *client, uint16_t caid, uint16_t sid, uint32_t prov
     reader_result_init(&reader_result);
 
     if (result) memset(result, 0, sizeof(*result));
-    if (!client || !ecm || ecm_len <= 0 || ecm_len > 255 || !cw)
+    if (!client || !ecm || !cw)
+        return -1;
+    /* Recheck every caller here as a final guard. Protocol handlers also call
+     * this before account/provider filtering so malformed requests never reach
+     * reader_dispatch_ecm(). */
+    if (!ecm_prepare_input(caid, &provid, ecm, &ecm_len))
         return -1;
 
     S_ACCOUNT *account = account_session_acquire(client);

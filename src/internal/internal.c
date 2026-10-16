@@ -51,7 +51,7 @@ typedef struct sci_parameters {
     uint32_t CWT;
     uint32_t BWT;
     uint32_t EGT;
-    uint32_t clock_stop_polarity;
+    unsigned char clock_stop_polarity;
     unsigned char check;
     unsigned char P;
     unsigned char I;
@@ -115,6 +115,9 @@ typedef struct {
     S_INTERNAL_JOB jobs[TCMG_INTERNAL_ECM_QUEUE_CAP];
     uint8_t atr[TCMG_INTERNAL_MAX_ATR];
     size_t atr_len;
+    char reset_fail[96];
+    int deprecated_cfg;
+    int deprecated_active;
     char device[256];
     char target_device[256];
     pthread_t worker_tid;
@@ -154,13 +157,17 @@ static int wait_readable(int fd, uint32_t timeout_ms)
 
 static int read_byte_timeout(int fd, uint8_t *out, uint32_t timeout_ms)
 {
+    const int64_t deadline = mono_ms() + (int64_t)timeout_ms;
     if (!out || wait_readable(fd, timeout_ms) < 0) return -1;
     for (;;) {
         ssize_t n = read(fd, out, 1);
         if (n == 1) return 0;
         if (n < 0 && errno == EINTR) continue;
         if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-            if (wait_readable(fd, timeout_ms) < 0) return -1;
+            int64_t left = deadline - mono_ms();
+            if (left <= 0) return -1;
+            tcmg_sleep_ms(left > 2 ? 2u : (uint32_t)left);
+            if (wait_readable(fd, (uint32_t)(deadline - mono_ms() > 0 ? deadline - mono_ms() : 1)) < 0) return -1;
             continue;
         }
         return -1;
@@ -562,7 +569,8 @@ static int parse_atr(S_INTERNAL_SLOT *s, size_t *atr_len_out)
         if (y & 0x20u) {
             if (n >= sizeof(s->atr) || read_byte_timeout(s->fd, &s->atr[n], TCMG_INTERNAL_ATR_BYTE_MS) < 0)
                 return -4;
-            if (group == 1) current_i = (uint8_t)(s->atr[n] & 0x0Fu);
+            if (group == 1) current_i = (uint8_t)((s->atr[n] & 0x60u) >> 5);
+            n++;
         }
         if (y & 0x40u) {
             if (n >= sizeof(s->atr) || read_byte_timeout(s->fd, &s->atr[n], TCMG_INTERNAL_ATR_BYTE_MS) < 0)
@@ -676,6 +684,18 @@ static uint32_t dreambox_pll_divider(uint32_t target_clock_10khz)
     return div ? div : 1u;
 }
 
+static void apply_deprecated_timing(S_INTERNAL_SLOT *s)
+{
+    s->t0_fi = 1;
+    s->t0_di = 1;
+    s->t0_d = 1;
+    s->t0_wi = TCMG_INTERNAL_DEFAULT_WI;
+    s->t0_n = 0;
+    s->t0_i = 0;
+    s->t0_wwt_etu = 960u * (uint32_t)s->t0_wi;
+    s->t0_egt_etu = 0;
+}
+
 static void finalize_t0_timing(S_INTERNAL_SLOT *s, SCI_PARAMETERS *post)
 {
     const uint32_t target_clock = dreambox_target_clock_10khz(s->t0_fi);
@@ -724,14 +744,16 @@ static int sci_write_parameters(S_INTERNAL_SLOT *s, const SCI_PARAMETERS *p)
 #endif
 }
 
-static int sci_reset_card(S_INTERNAL_SLOT *s, const char *reason)
+static int sci_reset_card_once(S_INTERNAL_SLOT *s, const char *reason, int deprecated)
 {
 #ifdef __linux__
     if (!s || s->fd < 0) return -1;
     const int64_t reset_t0 = mono_ms();
 
+    s->reset_fail[0] = '\0';
     if (reader_present(s) <= 0) {
         s->ready = 0;
+        snprintf(s->reset_fail, sizeof(s->reset_fail), "no card detected (SCI_GET_PRESENT errno=%d)", errno);
         return -1;
     }
 
@@ -744,6 +766,7 @@ static int sci_reset_card(S_INTERNAL_SLOT *s, const char *reason)
         SCI_PARAMETERS p;
         apply_initial_sci_parameters(s, &p, initial_fs);
         if (sci_write_parameters(s, &p) < 0) {
+            snprintf(s->reset_fail, sizeof(s->reset_fail), "SCI_SET_PARAMETERS failed fs=%u errno=%d", initial_fs, errno);
             s->params_applied = 0;
             if (attempt == TCMG_INTERNAL_PLL_RETRIES) break;
             continue;
@@ -755,6 +778,7 @@ static int sci_reset_card(S_INTERNAL_SLOT *s, const char *reason)
 
         uint32_t reset = 1;
         if (ioctl(s->fd, SCI_SET_RESET, &reset) < 0) {
+            snprintf(s->reset_fail, sizeof(s->reset_fail), "SCI_SET_RESET failed fs=%u errno=%d", initial_fs, errno);
             tcmg_log_dbg(D_READER,
                          "reset ioctl failed device=%s attempt=%u fs=%u errno=%d",
                          s->device, attempt + 1u, initial_fs, errno);
@@ -765,7 +789,9 @@ static int sci_reset_card(S_INTERNAL_SLOT *s, const char *reason)
 
         s->ready = 0;
         s->atr_len = 0;
-        if (parse_atr(s, &s->atr_len) < 0) {
+        int atr_rc = parse_atr(s, &s->atr_len);
+        if (atr_rc < 0) {
+            snprintf(s->reset_fail, sizeof(s->reset_fail), "ATR read failed fs=%u code=%d got=%zu bytes", initial_fs, atr_rc, s->atr_len);
             tcmg_log_dbg(D_READER,
                          "ATR read failed device=%s attempt=%u fs=%u",
                          s->device, attempt + 1u, initial_fs);
@@ -775,14 +801,17 @@ static int sci_reset_card(S_INTERNAL_SLOT *s, const char *reason)
 
         uint32_t atr_ready = 1;
         if (ioctl(s->fd, SCI_SET_ATR_READY, &atr_ready) < 0) {
+            snprintf(s->reset_fail, sizeof(s->reset_fail), "SCI_SET_ATR_READY failed errno=%d", errno);
             tcmg_log("ATR_READY failed device=%s errno=%d", s->device, errno);
             s->ready = 0;
             break;
         }
 
+        if (deprecated) apply_deprecated_timing(s);
         SCI_PARAMETERS post = p;
         finalize_t0_timing(s, &post);
         if (sci_write_parameters(s, &post) < 0) {
+            snprintf(s->reset_fail, sizeof(s->reset_fail), "post-ATR SCI_SET_PARAMETERS failed errno=%d", errno);
             tcmg_log("post-ATR SCI parameters failed device=%s errno=%d",
                      s->device, errno);
             s->ready = 0;
@@ -801,7 +830,8 @@ static int sci_reset_card(S_INTERNAL_SLOT *s, const char *reason)
     if (success == 0) {
         const uint32_t actual_clock = s->sci_fs ?
             TCMG_INTERNAL_DREAMBOX_CARDMHZ / s->sci_fs : 0;
-        tcmg_log_force("card reset ok reason=%s device=%s T=%d ATR=%zu fs=%u clock=%u.%02uMHz ETU=%u WWT=%ums D=%u WI=%u FI=%u elapsed=%lldms",
+        tcmg_log_force("card reset ok%s reason=%s device=%s T=%d ATR=%zu fs=%u clock=%u.%02uMHz ETU=%u WWT=%ums D=%u WI=%u FI=%u elapsed=%lldms",
+                       deprecated ? " (deprecated mode)" : "",
                        reason && *reason ? reason : "unknown",
                        s->device, s->protocol, s->atr_len,
                        s->sci_fs, actual_clock / 100u, (actual_clock % 100u) * 10u,
@@ -816,7 +846,34 @@ static int sci_reset_card(S_INTERNAL_SLOT *s, const char *reason)
 #endif
 }
 
+static int sci_reset_card(S_INTERNAL_SLOT *s, const char *reason)
+{
+    const int deprecated = s->deprecated_cfg || s->deprecated_active;
+    int rc = sci_reset_card_once(s, reason, deprecated);
+    if (rc == 0 || deprecated || reader_present(s) <= 0)
+        return rc;
+    tcmg_log("reader device=%s: Normal mode failed (%s), reverting to Deprecated Mode",
+             s->device, s->reset_fail[0] ? s->reset_fail : "card not recognised");
+    rc = sci_reset_card_once(s, reason, 1);
+    if (rc == 0) s->deprecated_active = 1;
+    return rc;
+}
+
+static int backend_reset_card_once(S_INTERNAL_SLOT *s, const char *reason, int deprecated);
+
 static int backend_reset_card(S_INTERNAL_SLOT *s, const char *reason)
+{
+    const int deprecated = s->deprecated_cfg || s->deprecated_active;
+    int rc = backend_reset_card_once(s, reason, deprecated);
+    if (rc == 0 || deprecated || reader_present(s) <= 0)
+        return rc;
+    tcmg_log("reader device=%s: Normal mode failed, reverting to Deprecated Mode", s->device);
+    rc = backend_reset_card_once(s, reason, 1);
+    if (rc == 0) s->deprecated_active = 1;
+    return rc;
+}
+
+static int backend_reset_card_once(S_INTERNAL_SLOT *s, const char *reason, int deprecated)
 {
     if (!s || !internal_backend_is_open(&s->backend)) return -1;
     int64_t reset_t0 = mono_ms();
@@ -831,6 +888,7 @@ static int backend_reset_card(S_INTERNAL_SLOT *s, const char *reason)
         s->ready = 0;
         return -1;
     }
+    if (deprecated) apply_deprecated_timing(s);
     calculate_t0_timing(s);
     s->present = 1;
     s->ready = 1;
@@ -1018,6 +1076,7 @@ static void *internal_reader_worker(void *arg)
             break;
 
         const char *target_device = cfg.device[0] ? cfg.device : "auto";
+        s->deprecated_cfg = cfg.deprecated ? 1 : 0;
 
         pthread_mutex_lock(&s->mtx);
         if (s->worker_stop) {
@@ -1049,6 +1108,7 @@ static void *internal_reader_worker(void *arg)
 
         int present = reader_present(s);
         if (!present) {
+            s->deprecated_active = 0;
             s->ready = 0;
             s->params_applied = 0;
             s->fast_reset_paused = 0;
@@ -1097,8 +1157,9 @@ static void *internal_reader_worker(void *arg)
                 int reset_rc = (s->backend.kind == TCMG_INTERNAL_BACKEND_SCI)
                     ? sci_reset_card(s, reason) : backend_reset_card(s, reason);
                 if (reset_rc < 0)
-                    tcmg_log("reader[%d]: %s reset failed backend=%s device=%s", index + 1, reason,
-                             internal_backend_name(&s->backend), s->device);
+                    tcmg_log("reader[%d]: %s reset failed backend=%s device=%s%s%s", index + 1, reason,
+                             internal_backend_name(&s->backend), s->device,
+                             s->reset_fail[0] ? " why=" : "", s->reset_fail);
                 if (s->ready) {
                     reader_old_ecm_sync(&s->old_ecm, &cfg);
                     reader_old_ecm_bind(&s->old_ecm, &cfg, s->device, s->atr, s->atr_len);
@@ -1157,7 +1218,6 @@ static void *internal_reader_worker(void *arg)
             int recoverable = 0;
             int rc = internal_conax_ecm(s, ecm, ecm_len, cw, &recoverable, 1);
             if (rc == 0) {
-                int64_t success_now = mono_ms();
                 reader_old_ecm_sync(&s->old_ecm, &cfg);
                 if (s->ready && s->present)
                     reader_old_ecm_bind(&s->old_ecm, &cfg, s->device, s->atr, s->atr_len);
@@ -1173,6 +1233,20 @@ static void *internal_reader_worker(void *arg)
                     memset(cw, 0, sizeof(cw));
                     recoverable = 0;
                     rc = internal_conax_ecm(s, ecm, ecm_len, cw, &recoverable, 1);
+                }
+                if (rc < 0 && recoverable && !s->deprecated_cfg && !s->deprecated_active) {
+                    pthread_mutex_lock(&s->mtx);
+                    tcmg_log("reader device=%s: ECM failed in normal mode, reverting to Deprecated Mode", s->device);
+                    s->deprecated_active = 1;
+                    reset_rc = (s->backend.kind == TCMG_INTERNAL_BACKEND_SCI)
+                        ? sci_reset_card(s, "ecm-deprecated") : backend_reset_card(s, "ecm-deprecated");
+                    if (reset_rc < 0) s->deprecated_active = 0;
+                    pthread_mutex_unlock(&s->mtx);
+                    if (reset_rc == 0) {
+                        memset(cw, 0, sizeof(cw));
+                        recoverable = 0;
+                        rc = internal_conax_ecm(s, ecm, ecm_len, cw, &recoverable, 1);
+                    }
                 }
             }
 
@@ -1231,10 +1305,12 @@ static int start_reader_worker(int index, const char *device)
     queue_reset_locked(s);
     tcmg_strlcpy(s->target_device, device ? device : "", sizeof(s->target_device));
     s->worker_running = 1;
-    if (pthread_create(&s->worker_tid, NULL, internal_reader_worker, (void *)(intptr_t)index) != 0) {
+    int trc = pthread_create(&s->worker_tid, NULL, internal_reader_worker, (void *)(intptr_t)index);
+    if (trc != 0) {
         s->worker_running = 0;
         s->target_device[0] = '\0';
         pthread_mutex_unlock(&s->mtx);
+        tcmg_log("internal reader %d worker thread failed rc=%d (%s)", index, trc, strerror(trc));
         return -1;
     }
     pthread_mutex_unlock(&s->mtx);
@@ -1309,9 +1385,11 @@ int internal_start(void)
     slots_init();
     if (atomic_exchange(&s_running, 1)) return 0;
     (void)internal_sync_once();
-    if (pthread_create(&s_tid, NULL, internal_thread, NULL) != 0) {
+    int trc = pthread_create(&s_tid, NULL, internal_thread, NULL);
+    if (trc != 0) {
         atomic_store(&s_running, 0);
         for (int i = 0; i < MAX_READERS; i++) stop_reader_worker(i);
+        tcmg_log("internal manager thread failed rc=%d (%s)", trc, strerror(trc));
         return -1;
     }
     tcmg_log("reader support enabled");

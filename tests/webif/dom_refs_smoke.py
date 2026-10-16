@@ -19,7 +19,6 @@ for name in ['js_common.h','js_users.h','js_readers.h','js_livelog.h']:
     s=(ROOT/'webif/assets'/name).read_text(); m=re.search(r'_DATA\[\].*?= \{(.*?)\};',s,re.S)
     arr=[int(x) for x in re.findall(r'\b\d+\b',m.group(1))]
     if 0 in bytes(arr):
-        # only a single C-string terminator is allowed, and asset length must exclude it
         z=0
         for x in reversed(arr):
             if x==0:z+=1

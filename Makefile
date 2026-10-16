@@ -231,7 +231,7 @@ else
   endif
 endif
 
-.PHONY: all clean debug release test-config test-network test-reader-rules test-reader-registry test-proto-registry test-account-core test-session test-ecm-pipeline test-cache test-webif-service test-webif-many-clients test-webif-concurrency test-config-runtime-access test-account-state test-antishare test-internal test-internal-t0 test-internal-ui test-serial test-old-ecm test-log check
+.PHONY: all clean debug release test-config test-network test-reader-rules test-reader-registry test-proto-registry test-account-core test-session test-ecm-pipeline test-cache test-webif-service test-webif-many-clients test-webif-concurrency test-config-runtime-access test-account-state test-antishare test-newcamd-timeout test-source-hardening test-internal test-internal-t0 test-internal-ui test-serial test-old-ecm test-log test-dvbapi check
 
 ASSET_HDRS := $(wildcard webif/assets/*.h)
 
@@ -250,6 +250,7 @@ test-config: $(TARGET)
 test-network: $(TARGET)
 	@mkdir -p $(BUILD_DIR)
 	$(CC) $(TEST_COMMON_CFLAGS) tests/reader_smoke.c $(filter-out $(OBJ_DIR)/src/main.o,$(OBJS)) -o $(BUILD_DIR)/test_reader_smoke $(LDFLAGS)
+	$(CC) $(TEST_COMMON_CFLAGS) tests/camd35_udp_smoke.c $(filter-out $(OBJ_DIR)/src/main.o,$(OBJS)) -o $(BUILD_DIR)/test_camd35_udp_smoke $(LDFLAGS)
 	TCMG_NETWORK_BUILD_DIR="$(abspath $(BUILD_DIR))" bash ./tests/network_matrix.sh
 
 test-reader-rules: $(TARGET)
@@ -309,6 +310,14 @@ test-antishare: $(TARGET)
 	$(CC) $(TEST_COMMON_CFLAGS) tests/antishare_smoke.c $(filter-out $(OBJ_DIR)/src/main.o,$(OBJS)) -o $(BUILD_DIR)/test_antishare $(LDFLAGS)
 	$(BUILD_DIR)/test_antishare
 
+test-newcamd-timeout: $(TARGET)
+	$(CC) $(TEST_COMMON_CFLAGS) tests/newcamd_timeout_smoke.c $(filter-out $(OBJ_DIR)/src/main.o,$(OBJS)) -o $(BUILD_DIR)/test_newcamd_timeout $(LDFLAGS)
+	$(BUILD_DIR)/test_newcamd_timeout
+
+test-source-hardening: $(TARGET)
+	$(CC) $(TEST_COMMON_CFLAGS) tests/source_hardening_smoke.c $(filter-out $(OBJ_DIR)/src/main.o,$(OBJS)) -o $(BUILD_DIR)/test_source_hardening $(LDFLAGS)
+	$(BUILD_DIR)/test_source_hardening
+
 test-internal: $(TARGET)
 	$(CC) $(TEST_COMMON_CFLAGS) tests/internal_smoke.c $(filter-out $(OBJ_DIR)/src/main.o,$(OBJS)) -o $(BUILD_DIR)/test_internal $(LDFLAGS)
 	$(BUILD_DIR)/test_internal
@@ -324,13 +333,17 @@ test-serial: $(TARGET)
 	$(CC) $(TEST_COMMON_CFLAGS) tests/serial_smoke.c $(filter-out $(OBJ_DIR)/src/main.o,$(OBJS)) -o $(BUILD_DIR)/test_serial $(LDFLAGS)
 	$(BUILD_DIR)/test_serial
 
+test-dvbapi: $(TARGET)
+	$(CC) $(TEST_COMMON_CFLAGS) tests/dvbapi_smoke.c $(filter-out $(OBJ_DIR)/src/main.o,$(OBJS)) -o $(BUILD_DIR)/test_dvbapi $(LDFLAGS)
+	$(BUILD_DIR)/test_dvbapi
+
 test-old-ecm:
 	@mkdir -p $(BUILD_DIR)
 	$(CC) $(TEST_COMMON_CFLAGS) tests/old_ecm_smoke.c src/reader/old_ecm.c -o $(BUILD_DIR)/test_old_ecm $(LDFLAGS)
 	$(BUILD_DIR)/test_old_ecm
 	./tests/old_ecm_source_smoke.sh
 
-test: test-config test-network test-reader-rules test-reader-registry test-proto-registry test-account-core test-session test-ecm-pipeline test-cache test-webif-service test-webif-many-clients test-webif-concurrency test-config-runtime-access test-account-state test-antishare test-internal test-internal-t0 test-internal-ui test-serial test-old-ecm test-log
+test: test-config test-network test-reader-rules test-reader-registry test-proto-registry test-account-core test-session test-ecm-pipeline test-cache test-webif-service test-webif-many-clients test-webif-concurrency test-config-runtime-access test-account-state test-antishare test-newcamd-timeout test-source-hardening test-internal test-internal-t0 test-internal-ui test-serial test-old-ecm test-log test-dvbapi
 
 check: $(ASSET_HDRS)
 	@set -e; \
@@ -347,6 +360,7 @@ check: $(ASSET_HDRS)
 	if grep -RInE 'g_cfg\.(acc_lock|accounts|naccounts)' src/account src/client src/proto/cccam.c src/proto/camd35_server.c --exclude='account_state.c'; then echo 'ACCOUNT STATE boundary violation detected' >&2; exit 1; fi; \
 	if grep -RInE '\bfetch\(' webif/pages webif/core.c | grep -v 'js_common.h'; then echo 'DIRECT FETCH IN PAGE DETECTED' >&2; exit 1; fi; \
 	python3 tests/webif/dom_refs_smoke.py; \
+	./tests/password_visibility_smoke.sh; \
 	if grep -RInE '"../../src/(core/config_state|core/client_state|config/config|client/client|security/failban)' webif/api webif/pages webif/core.c webif/server.c; then echo 'WEBIF internal include detected' >&2; exit 1; fi; \
 	if grep -nE '@media[^\n]*(max-width|min-width)' webif/assets/css.h; then echo 'WIDTH-BASED RESPONSIVE MEDIA QUERY DETECTED' >&2; exit 1; fi; \
 	if grep -RIn 'globals.h' src webif tests --include='*.c' --include='*.h' >/tmp/tcmg-globals.$$ 2>/dev/null && [ -s /tmp/tcmg-globals.$$ ]; then echo 'Umbrella globals.h include detected' >&2; rm -f /tmp/tcmg-globals.$$; exit 1; fi; rm -f /tmp/tcmg-globals.$$; \

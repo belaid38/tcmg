@@ -15,6 +15,7 @@
 #include "proto/registry.h"
 #include "webif/server.h"
 #include "client/client.h"
+#include "dvbapi/dvbapi.h"
 #include "security/failban.h"
 
 static char **g_argv_saved = NULL;
@@ -59,6 +60,7 @@ static void print_usage(const char *prog)
 	       "                0x0001=wire    0x0002=ecm     0x0004=emu\n"
 	       "                0x0008=newcamd 0x0010=cccam   0x0020=http\n"
 	       "                0x0040=conn    0x0080=reader  0x0100=protocol\n"
+	       "                0x0200=dvbapi\n"
 	       "                0xFFFF=all\n"
 	       "  -v          Show version and exit\n"
 	       "  -h          Show this help\n\n",
@@ -186,6 +188,7 @@ int main(int argc, char *argv[])
 	serial_start();
 	webif_start();
 	proto_start_all();
+	dvbapi_start();
 
 	int scheduled_restart_day = -1;
 	while (g_running)
@@ -241,6 +244,7 @@ int main(int argc, char *argv[])
 	pcsc_stop();
 	internal_stop();
 	serial_stop();
+	dvbapi_stop();
 	proto_stop_all();
 
 	if (atomic_load(&g_restart_immediate))

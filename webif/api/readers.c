@@ -2,6 +2,7 @@
 #define MODULE_LOG_PREFIX "webif"
 #include "../../src/serial/serial.h"
 #include "../../src/reader/protocol.h"
+#include "../../src/reader/rules.h"
 #include "../service/service.h"
 #include "../../src/core/utils.h"
 #include "../internal/proto.h"
@@ -22,9 +23,10 @@ typedef struct {
     char caid[WEBIF_CAID_LIST_LEN];
     char ident[WEBIF_IDENT_LIST_LEN];
     char sid[WEBIF_SID_LIST_LEN];
-    char ecmwl[8];
+    char ecmwl[CFGVAL_LEN];
     char groups[WEBIF_GROUPS_LEN];
     char ecmkeys[WEBIF_ECMKEYS_LEN];
+    char deprecated[8];
     char fast_reset[16];
     char fast_reset_idle[16];
     char poll_ms[16];
@@ -135,6 +137,7 @@ static const char *parse_reader_form(const char *body, reader_form *f, int index
         webif_form_copy(body, "FAST_RESET_IDLE", f->fast_reset_idle, sizeof(f->fast_reset_idle)) < 0 ||
         webif_form_copy(body, "POLL_MS", f->poll_ms, sizeof(f->poll_ms)) < 0)
         return "field too long";
+    if (webif_form_present(body, "DEPRECATED") && webif_form_copy(body, "DEPRECATED", f->deprecated, sizeof(f->deprecated)) < 0) return "field too long";
     if (webif_form_present(body, "MAINTENANCE_MODE") && webif_form_copy(body, "MAINTENANCE_MODE", f->maintenance_mode, sizeof(f->maintenance_mode)) < 0) return "field too long";
     if (webif_form_present(body, "OLD_ECM_SOURCE") && webif_form_copy(body, "OLD_ECM_SOURCE", f->old_ecm_source, sizeof(f->old_ecm_source)) < 0) return "field too long";
     if (webif_form_present(body, "OLD_ECM_SUCCESSES") && webif_form_copy(body, "OLD_ECM_SUCCESSES", f->old_ecm_successes, sizeof(f->old_ecm_successes)) < 0) return "field too long";
@@ -149,10 +152,8 @@ static const char *parse_reader_form(const char *body, reader_form *f, int index
 
     long v;
     if (rnum(f->enabled, 0, 1, &v) < 0) return "enabled must be 0 or 1";
-    if (f->ecmwl[0]) {
-        char *e = NULL; unsigned long x = strtoul(f->ecmwl, &e, 16);
-        if (e == f->ecmwl || *e || x > 0xFF) return "ecmwhitelist must be 00-FF";
-    }
+    if (!reader_ecm_whitelist_validate(f->ecmwl))
+        return "invalid ecmwhitelist syntax (use [CAID[@provid]:]len[,len][;...])";
     if (validate_u16_list(f->caid, MAX_CAIDS_PER_READER, WEBIF_CAID_LIST_LEN) < 0) return "invalid CAID list";
     if (strlen(f->ident) >= WEBIF_IDENT_LIST_LEN) return "invalid IDENT list";
     if (validate_u16_list(f->sid, MAX_SID_WHITELIST, WEBIF_SID_LIST_LEN) < 0) return "invalid SID whitelist";
@@ -167,10 +168,6 @@ static const char *parse_reader_form(const char *body, reader_form *f, int index
         for (size_t z = 0; z < old_len; z++) if (!isxdigit((unsigned char)f->old_ecm[z])) return "OLD_ECM must be hexadecimal";
         if (!strcmp(f->maintenance_mode, "old_ecm") && !strcmp(f->old_ecm_source, "manual")) {
             if (old_len < 2) return "manual old ECM is required";
-            if (f->ecmwl[0]) {
-                char *end = NULL; unsigned long wl = strtoul(f->ecmwl, &end, 16);
-                if (end == f->ecmwl || *end || wl > 0xFF || (int)(old_len / 2u) != (int)wl) return "OLD_ECM length must match ECM whitelist";
-            }
         }
     }
 
@@ -178,6 +175,7 @@ static const char *parse_reader_form(const char *body, reader_form *f, int index
         if (validate_ecmkeys(f->ecmkeys) < 0) return "invalid ECM key list";
     } else if (protocol->kind == READER_PROTOCOL_CARD) {
         if (!strcmp(protocol->name, "internal")) {
+            if (f->deprecated[0] && rnum(f->deprecated, 0, 1, &v) < 0) return "DEPRECATED must be 0 or 1";
             if (rnum(f->fast_reset, 0, 86400, &v) < 0) return "FAST_RESET must be 0-86400 seconds for internal readers";
             if (rnum(f->fast_reset_idle, 0, 86400, &v) < 0) return "FAST_RESET_IDLE must be 0-86400 seconds";
         } else {
@@ -235,8 +233,8 @@ static int view_json(char **dst, int *bsz, int pos, const S_WEBIF_READER_VIEW *r
     }
     if (!strcasecmp(r->protocol, "internal")) {
         pos = buf_printf(dst, bsz, pos,
-            "\",\"FAST_RESET\":%d,\"FAST_RESET_IDLE\":%d,\"cw_ok\":%lld,\"cw_nok\":%lld,\"active\":%d,\"owned\":%d,\"present\":%d,\"ready\":%d,\"backend\":\"%s\"",
-            r->fast_reset, r->fast_reset_idle, (long long)r->cw_ok, (long long)r->cw_nok, r->active, owned, present, ready, backend);
+            "\",\"DEPRECATED\":%d,\"FAST_RESET\":%d,\"FAST_RESET_IDLE\":%d,\"cw_ok\":%lld,\"cw_nok\":%lld,\"active\":%d,\"owned\":%d,\"present\":%d,\"ready\":%d,\"backend\":\"%s\"",
+            r->deprecated ? 1 : 0, r->fast_reset, r->fast_reset_idle, (long long)r->cw_ok, (long long)r->cw_nok, r->active, owned, present, ready, backend);
     } else {
         pos = buf_printf(dst, bsz, pos,
             "\",\"FAST_RESET\":%d,\"FAST_RESET_IDLE\":%d,\"POLL_MS\":%d,\"cw_ok\":%lld,\"cw_nok\":%lld,\"active\":%d,\"owned\":%d,\"present\":%d,\"ready\":%d",
@@ -259,8 +257,10 @@ static int view_json(char **dst, int *bsz, int pos, const S_WEBIF_READER_VIEW *r
     pos = buf_printf(dst, bsz, pos, "\",\"ident\":\"");
     pos = buf_json_string(dst, bsz, pos, r->idents);
     if (pos < 0) return -1;
-    pos = buf_printf(dst, bsz, pos, "\",\"ecmwhitelist\":\"%02X\",\"group\":\"",
-                     (unsigned)(r->ecm_whitelist & 255));
+    pos = buf_printf(dst, bsz, pos, "\",\"ecmwhitelist\":\"");
+    pos = buf_json_string(dst, bsz, pos, r->ecmwhitelist);
+    if (pos < 0) return -1;
+    pos = buf_printf(dst, bsz, pos, "\",\"group\":\"");
     pos = buf_json_string(dst, bsz, pos, r->groups);
     if (pos < 0) return -1;
     pos = buf_printf(dst, bsz, pos, "\",\"ecmkeys\":\"");
@@ -349,6 +349,7 @@ static void form_to_edit(const reader_form *f, int index, S_WEBIF_READER_EDIT *e
     tcmg_strlcpy(e->caid,f->caid,sizeof(e->caid)); tcmg_strlcpy(e->ident,f->ident,sizeof(e->ident)); tcmg_strlcpy(e->sid_whitelist,f->sid,sizeof(e->sid_whitelist));
     tcmg_strlcpy(e->ecmwhitelist,f->ecmwl,sizeof(e->ecmwhitelist)); tcmg_strlcpy(e->group,f->groups,sizeof(e->group));
     tcmg_strlcpy(e->ecmkeys,f->ecmkeys,sizeof(e->ecmkeys));
+    tcmg_strlcpy(e->deprecated,f->deprecated,sizeof(e->deprecated));
     tcmg_strlcpy(e->fast_reset,f->fast_reset,sizeof(e->fast_reset));
     tcmg_strlcpy(e->fast_reset_idle,f->fast_reset_idle,sizeof(e->fast_reset_idle));
     tcmg_strlcpy(e->poll_ms,f->poll_ms,sizeof(e->poll_ms));

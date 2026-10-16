@@ -179,9 +179,12 @@ static bool ncd_handle_login(S_CLIENT *cl,
 	return true;
 }
 
+#define NCD_CARD_MAX_PROV 16
+
 static void ncd_handle_card(S_CLIENT *cl, uint16_t sid, uint16_t mid, uint32_t pid)
 {
-    uint8_t resp[26];
+    uint8_t resp[15 + 11 * NCD_CARD_MAX_PROV];
+    int32_t rlen = 26;
     S_ACCOUNT *account = account_session_acquire(cl);
     uint16_t caids[MAX_CAIDS_PER_ACC + (MAX_READERS * MAX_CAIDS_PER_READER)];
     int32_t ncaids = account ? account_collect_caids(account, caids,
@@ -192,7 +195,30 @@ static void ncd_handle_card(S_CLIENT *cl, uint16_t sid, uint16_t mid, uint32_t p
     resp[0] = MSG_CARD_DATA;
     resp[4] = (uint8_t)(caid >> 8);
     resp[5] = (uint8_t)(caid & 0xFF);
-    nc_send(cl, resp, 26, sid, mid, pid);
+    {
+        /* OSCam (and other strict clients) drop every ECM whose provider is not
+         * announced here, so a card with 0 providers never receives a request.
+         * Announce the account idents of this CAID, or provider 000000. */
+        int32_t nprov = 0;
+        if (account) {
+            for (int32_t i = 0; i < account->nidents && nprov < NCD_CARD_MAX_PROV; i++) {
+                uint32_t pv = account->idents[i].provid;
+                bool dup = false;
+                if (account->idents[i].caid != caid) continue;
+                for (int32_t k = 0; k < nprov; k++)
+                    if ((uint32_t)((resp[15 + 11 * k] << 16) | (resp[16 + 11 * k] << 8) | resp[17 + 11 * k]) == pv) dup = true;
+                if (dup) continue;
+                resp[15 + 11 * nprov] = (uint8_t)(pv >> 16);
+                resp[16 + 11 * nprov] = (uint8_t)(pv >> 8);
+                resp[17 + 11 * nprov] = (uint8_t)pv;
+                nprov++;
+            }
+        }
+        if (nprov == 0) nprov = 1;
+        resp[14] = (uint8_t)nprov;
+        rlen = 15 + 11 * nprov;
+    }
+    nc_send(cl, resp, rlen, sid, mid, pid);
     tcmg_log_dbg(D_NEWCAMD, "%s CARD_DATA user='%s' caid=%04X sid=%04X",
                  cl->identity.ip, cl->identity.user, caid, sid);
 
@@ -240,7 +266,15 @@ static void ncd_handle_ecm(S_CLIENT *cl, uint8_t cmd,
         return;
     }
 
-    access = ecm_access(cl, ecm_caid, sid, pid, true, true, true);
+    int32_t normalized_len = dlen;
+    uint32_t provid = 0;
+    if (!ecm_prepare_input(ecm_caid, &provid, data, &normalized_len)) {
+        ncd_ecm_nak(cl, cmd, sid, mid, pid);
+        return;
+    }
+    dlen = normalized_len;
+    provid = ecm_resolve_provid(cl, ecm_caid, provid, data, dlen);
+    access = ecm_access(cl, ecm_caid, sid, provid);
     if (access != ECM_ACCESS_OK) {
         switch (access) {
         case ECM_ACCESS_DISABLED:
@@ -265,6 +299,10 @@ static void ncd_handle_ecm(S_CLIENT *cl, uint8_t cmd,
             tcmg_log("%s ECM denied: caid=%04X not permitted for user='%s'",
                      cl->identity.ip, ecm_caid, cl->identity.user);
             break;
+        case ECM_ACCESS_IDENT_DENIED:
+            tcmg_log("%s ECM denied: provider %06X (caid %04X) not allowed for user='%s'",
+                     cl->identity.ip, provid, ecm_caid, cl->identity.user);
+            break;
         case ECM_ACCESS_SID_DENIED:
             tcmg_log_dbg(D_NEWCAMD, "%s ECM denied: sid=%04X not in whitelist for user='%s'",
                          cl->identity.ip, sid, cl->identity.user);
@@ -281,7 +319,7 @@ static void ncd_handle_ecm(S_CLIENT *cl, uint8_t cmd,
                  cl->identity.ip, cl->identity.user, ecm_caid, sid, dlen,
                  cl->ecm.last_channel[0] ? cl->ecm.last_channel : "unknown");
 
-    if (ecm_process(cl, ecm_caid, sid, pid, data, dlen, cw, &result) < 0) {
+    if (ecm_process(cl, ecm_caid, sid, provid, data, dlen, cw, &result) < 0) {
         resp[0] = cmd;
         resp[1] = resp[2] = 0;
         nc_send(cl, resp, 3, sid, mid, pid);
@@ -361,14 +399,20 @@ void *handle_newcamd_client(void *arg)
 		if (dlen < 0)
 		{
 			if (cl.identity.user[0]) {
-				S_ACCOUNT_STATS_SNAPSHOT stats;
+				S_ACCOUNT_STATS_SNAPSHOT stats = {0};
                 S_ACCOUNT *sa = account_session_acquire(&cl);
+                bool have_stats = sa != NULL;
                 if (sa) { account_stats_snapshot(sa, &stats); account_release(sa); }
-				tcmg_log("%s disconnected user='%s' ecm_total=%llu cw_found=%lld cw_not=%lld",
-				         cl.identity.ip, cl.identity.user,
-				         (unsigned long long)stats.ecm_total,
-				         (long long)stats.cw_found,
-				         (long long)stats.cw_not);
+                if (have_stats) {
+                    tcmg_log("%s disconnected user='%s' ecm_total=%llu cw_found=%lld cw_not=%lld",
+                             cl.identity.ip, cl.identity.user,
+                             (unsigned long long)stats.ecm_total,
+                             (long long)stats.cw_found,
+                             (long long)stats.cw_not);
+                } else {
+                    tcmg_log("%s disconnected user='%s' account stats unavailable",
+                             cl.identity.ip, cl.identity.user);
+                }
 			}
 			else
 				tcmg_log_dbg(D_CONN, "%s disconnected (before login)", cl.identity.ip);

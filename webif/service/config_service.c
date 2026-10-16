@@ -30,6 +30,8 @@ bool webif_config_snapshot(S_WEBIF_CONFIG_VIEW *out)
     out->cccam_port = g_cfg.cccam_port;
     out->cs378x_port = g_cfg.cs378x_port;
     tcmg_strlcpy(out->cs378x_bindaddr, g_cfg.cs378x_bindaddr, sizeof(out->cs378x_bindaddr));
+    out->camd35_port = g_cfg.camd35_port;
+    tcmg_strlcpy(out->camd35_bindaddr, g_cfg.camd35_bindaddr, sizeof(out->camd35_bindaddr));
     out->sock_timeout = g_cfg.sock_timeout;
     out->server_keepalive = g_cfg.server_keepalive;
     out->server_keepalive_misses = g_cfg.server_keepalive_misses;
@@ -59,8 +61,21 @@ bool webif_config_snapshot(S_WEBIF_CONFIG_VIEW *out)
     tcmg_strlcpy(out->seller_type, g_cfg.seller_type, sizeof(out->seller_type));
     tcmg_strlcpy(out->seller_host, g_cfg.seller_host, sizeof(out->seller_host));
     out->seller_port = g_cfg.seller_port;
+    out->dvbapi_enabled = g_cfg.dvbapi_enabled;
+    tcmg_strlcpy(out->dvbapi_user, g_cfg.dvbapi_user, sizeof(out->dvbapi_user));
+    tcmg_strlcpy(out->dvbapi_socket, g_cfg.dvbapi_socket, sizeof(out->dvbapi_socket));
+    tcmg_strlcpy(out->dvbapi_boxtype, g_cfg.dvbapi_boxtype, sizeof(out->dvbapi_boxtype));
+    out->dvbapi_delay_ms = g_cfg.dvbapi_delay_ms;
+    out->dvbapi_max_services = g_cfg.dvbapi_max_services;
     pthread_rwlock_unlock(&g_cfg.acc_lock);
     return true;
+}
+
+static bool config_bind_is_loopback(const char *bindaddr)
+{
+    struct in_addr addr;
+    if (!bindaddr || inet_pton(AF_INET, bindaddr, &addr) != 1) return false;
+    return (ntohl(addr.s_addr) & 0xFF000000u) == 0x7F000000u;
 }
 
 bool webif_config_apply(const S_WEBIF_CONFIG_PATCH *p, bool *restart_required)
@@ -70,21 +85,37 @@ bool webif_config_apply(const S_WEBIF_CONFIG_PATCH *p, bool *restart_required)
 
     pthread_mutex_lock(&g_cfg_transition_mtx);
     pthread_rwlock_wrlock(&g_cfg.acc_lock);
+
+    const char *candidate_user = p->has_webif_user ? p->webif_user : g_cfg.webif_user;
+    const char *candidate_pass = p->has_webif_pass ? p->webif_pass : g_cfg.webif_pass;
+    const char *candidate_bind = p->has_webif_bindaddr ? p->webif_bindaddr : g_cfg.webif_bindaddr;
+    int candidate_port = p->has_webif_port ? p->webif_port : g_cfg.webif_port;
+    if (g_cfg.webif_enabled && candidate_port > 0 &&
+        !config_bind_is_loopback(candidate_bind) &&
+        (!candidate_user[0] || !candidate_pass[0])) {
+        pthread_rwlock_unlock(&g_cfg.acc_lock);
+        pthread_mutex_unlock(&g_cfg_transition_mtx);
+        return false;
+    }
+
     int old_webif_enabled = g_cfg.webif_enabled;
     int old_webif_port = g_cfg.webif_port;
     char old_webif_bindaddr[MAXIPLEN];
     char old_newcamd_bindaddr[MAXIPLEN];
     char old_cccam_bindaddr[MAXIPLEN];
     char old_cs378x_bindaddr[MAXIPLEN];
+    char old_camd35_bindaddr[MAXIPLEN];
     tcmg_strlcpy(old_webif_bindaddr, g_cfg.webif_bindaddr, sizeof(old_webif_bindaddr));
     tcmg_strlcpy(old_newcamd_bindaddr, g_cfg.newcamd_bindaddr, sizeof(old_newcamd_bindaddr));
     tcmg_strlcpy(old_cccam_bindaddr, g_cfg.cccam_bindaddr, sizeof(old_cccam_bindaddr));
     tcmg_strlcpy(old_cs378x_bindaddr, g_cfg.cs378x_bindaddr, sizeof(old_cs378x_bindaddr));
+    tcmg_strlcpy(old_camd35_bindaddr, g_cfg.camd35_bindaddr, sizeof(old_camd35_bindaddr));
     int old_newcamd_port = g_cfg.newcamd_port;
     int old_newcamd_keepalive = g_cfg.newcamd_keepalive;
     int old_newcamd_mgclient = g_cfg.newcamd_mgclient;
     int old_cccam_port = g_cfg.cccam_port;
     int old_cs378x_port = g_cfg.cs378x_port;
+    int old_camd35_port = g_cfg.camd35_port;
     int old_sock_timeout = g_cfg.sock_timeout;
     int old_server_keepalive = g_cfg.server_keepalive;
     int old_server_keepalive_misses = g_cfg.server_keepalive_misses;
@@ -109,6 +140,20 @@ bool webif_config_apply(const S_WEBIF_CONFIG_PATCH *p, bool *restart_required)
     tcmg_strlcpy(old_seller_name, g_cfg.seller_name, sizeof(old_seller_name));
     tcmg_strlcpy(old_seller_type, g_cfg.seller_type, sizeof(old_seller_type));
     tcmg_strlcpy(old_seller_host, g_cfg.seller_host, sizeof(old_seller_host));
+    struct {
+        int dvbapi_enabled;
+        char dvbapi_user[CFGKEY_LEN];
+        char dvbapi_socket[CFGPATH_LEN];
+        char dvbapi_boxtype[16];
+        int dvbapi_delay_ms;
+        int dvbapi_max_services;
+    } old_dv;
+    old_dv.dvbapi_enabled = g_cfg.dvbapi_enabled;
+    tcmg_strlcpy(old_dv.dvbapi_user, g_cfg.dvbapi_user, sizeof(old_dv.dvbapi_user));
+    tcmg_strlcpy(old_dv.dvbapi_socket, g_cfg.dvbapi_socket, sizeof(old_dv.dvbapi_socket));
+    tcmg_strlcpy(old_dv.dvbapi_boxtype, g_cfg.dvbapi_boxtype, sizeof(old_dv.dvbapi_boxtype));
+    old_dv.dvbapi_delay_ms = g_cfg.dvbapi_delay_ms;
+    old_dv.dvbapi_max_services = g_cfg.dvbapi_max_services;
 
     if (p->has_newcamd_port) g_cfg.newcamd_port = p->newcamd_port;
     if (p->has_newcamd_bindaddr) tcmg_strlcpy(g_cfg.newcamd_bindaddr, p->newcamd_bindaddr, sizeof(g_cfg.newcamd_bindaddr));
@@ -118,6 +163,8 @@ bool webif_config_apply(const S_WEBIF_CONFIG_PATCH *p, bool *restart_required)
     if (p->has_cccam_port) g_cfg.cccam_port = p->cccam_port;
     if (p->has_cs378x_port) g_cfg.cs378x_port = p->cs378x_port;
     if (p->has_cs378x_bindaddr) tcmg_strlcpy(g_cfg.cs378x_bindaddr, p->cs378x_bindaddr, sizeof(g_cfg.cs378x_bindaddr));
+    if (p->has_camd35_port) g_cfg.camd35_port = p->camd35_port;
+    if (p->has_camd35_bindaddr) tcmg_strlcpy(g_cfg.camd35_bindaddr, p->camd35_bindaddr, sizeof(g_cfg.camd35_bindaddr));
     if (p->has_sock_timeout) g_cfg.sock_timeout = p->sock_timeout;
     if (p->has_server_keepalive) g_cfg.server_keepalive = p->server_keepalive;
     if (p->has_server_keepalive_misses) g_cfg.server_keepalive_misses = p->server_keepalive_misses;
@@ -138,12 +185,22 @@ bool webif_config_apply(const S_WEBIF_CONFIG_PATCH *p, bool *restart_required)
     if (p->has_seller_type) tcmg_strlcpy(g_cfg.seller_type, p->seller_type, sizeof(g_cfg.seller_type));
     if (p->has_seller_host) tcmg_strlcpy(g_cfg.seller_host, p->seller_host, sizeof(g_cfg.seller_host));
     if (p->has_seller_port) g_cfg.seller_port = p->seller_port;
+    if (p->has_dvbapi_enabled) g_cfg.dvbapi_enabled = p->dvbapi_enabled != 0;
+    if (p->has_dvbapi_user) tcmg_strlcpy(g_cfg.dvbapi_user, p->dvbapi_user, sizeof(g_cfg.dvbapi_user));
+    if (p->has_dvbapi_socket) tcmg_strlcpy(g_cfg.dvbapi_socket, p->dvbapi_socket, sizeof(g_cfg.dvbapi_socket));
+    if (p->has_dvbapi_boxtype) tcmg_strlcpy(g_cfg.dvbapi_boxtype, p->dvbapi_boxtype, sizeof(g_cfg.dvbapi_boxtype));
+    if (p->has_dvbapi_delay) g_cfg.dvbapi_delay_ms = p->dvbapi_delay_ms;
+    if (p->has_dvbapi_max_services) g_cfg.dvbapi_max_services = p->dvbapi_max_services;
 
     bool restart =
+        old_dv.dvbapi_enabled != g_cfg.dvbapi_enabled || strcmp(old_dv.dvbapi_user, g_cfg.dvbapi_user) != 0 ||
+        strcmp(old_dv.dvbapi_socket, g_cfg.dvbapi_socket) != 0 || strcmp(old_dv.dvbapi_boxtype, g_cfg.dvbapi_boxtype) != 0 ||
+        old_dv.dvbapi_delay_ms != g_cfg.dvbapi_delay_ms || old_dv.dvbapi_max_services != g_cfg.dvbapi_max_services ||
         old_webif_enabled != g_cfg.webif_enabled || old_webif_port != g_cfg.webif_port || strcmp(old_webif_bindaddr, g_cfg.webif_bindaddr) != 0 ||
         old_newcamd_port != g_cfg.newcamd_port || strcmp(old_newcamd_bindaddr, g_cfg.newcamd_bindaddr) != 0 ||
         old_cccam_port != g_cfg.cccam_port || strcmp(old_cccam_bindaddr, g_cfg.cccam_bindaddr) != 0 ||
-        old_cs378x_port != g_cfg.cs378x_port || strcmp(old_cs378x_bindaddr, g_cfg.cs378x_bindaddr) != 0;
+        old_cs378x_port != g_cfg.cs378x_port || strcmp(old_cs378x_bindaddr, g_cfg.cs378x_bindaddr) != 0 ||
+        old_camd35_port != g_cfg.camd35_port || strcmp(old_camd35_bindaddr, g_cfg.camd35_bindaddr) != 0;
 
     pthread_rwlock_unlock(&g_cfg.acc_lock);
 
@@ -162,6 +219,8 @@ bool webif_config_apply(const S_WEBIF_CONFIG_PATCH *p, bool *restart_required)
         tcmg_strlcpy(g_cfg.cccam_bindaddr, old_cccam_bindaddr, sizeof(g_cfg.cccam_bindaddr));
         g_cfg.cs378x_port = old_cs378x_port;
         tcmg_strlcpy(g_cfg.cs378x_bindaddr, old_cs378x_bindaddr, sizeof(g_cfg.cs378x_bindaddr));
+        g_cfg.camd35_port = old_camd35_port;
+        tcmg_strlcpy(g_cfg.camd35_bindaddr, old_camd35_bindaddr, sizeof(g_cfg.camd35_bindaddr));
         g_cfg.sock_timeout = old_sock_timeout;
         g_cfg.server_keepalive = old_server_keepalive;
         g_cfg.server_keepalive_misses = old_server_keepalive_misses;
@@ -181,6 +240,12 @@ bool webif_config_apply(const S_WEBIF_CONFIG_PATCH *p, bool *restart_required)
         tcmg_strlcpy(g_cfg.seller_type, old_seller_type, sizeof(g_cfg.seller_type));
         tcmg_strlcpy(g_cfg.seller_host, old_seller_host, sizeof(g_cfg.seller_host));
         g_cfg.seller_port = old_seller_port;
+        g_cfg.dvbapi_enabled = old_dv.dvbapi_enabled;
+        tcmg_strlcpy(g_cfg.dvbapi_user, old_dv.dvbapi_user, sizeof(g_cfg.dvbapi_user));
+        tcmg_strlcpy(g_cfg.dvbapi_socket, old_dv.dvbapi_socket, sizeof(g_cfg.dvbapi_socket));
+        tcmg_strlcpy(g_cfg.dvbapi_boxtype, old_dv.dvbapi_boxtype, sizeof(g_cfg.dvbapi_boxtype));
+        g_cfg.dvbapi_delay_ms = old_dv.dvbapi_delay_ms;
+        g_cfg.dvbapi_max_services = old_dv.dvbapi_max_services;
         pthread_rwlock_unlock(&g_cfg.acc_lock);
     } else {
         if (restart_required) *restart_required = restart;
@@ -252,10 +317,9 @@ done:
 
 static bool validate_reader_editor_text(const char *content, char *err, size_t errsz)
 {
-    /* old_ecm_trigger / old_ecm_interval are legacy keys: still accepted, ignored by the loader. */
     static const char *const keys[] = {
         "label", "protocol", "enabled", "device", "user", "password", "group", "caid", "ident",
-        "sid_whitelist", "ecmwhitelist", "inactivitytimeout", "do_ecm", "fast_reset", "fast_reset_idle",
+        "sid_whitelist", "ecmwhitelist", "inactivitytimeout", "do_ecm", "fast_reset", "fast_reset_idle", "deprecated",
         "maintenance_mode", "old_ecm_source", "old_ecm_trigger", "old_ecm_interval", "old_ecm_successes",
         "old_ecm", "poll_ms", "key", "ecmkey"
     };
